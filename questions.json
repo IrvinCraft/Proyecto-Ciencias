@@ -1,0 +1,129 @@
+{
+    "metadata": {
+        "author": "Profesor",
+        "version": "1.0",
+        "description": "Banco de preguntas de ejemplo para el Quiz Educativo"
+    },
+    "questions": [
+        {
+            "pregunta": "¿Cuál es la capital de Francia?",
+            "opciones": ["Madrid", "Berlín", "París", "Lisboa"],
+            "respuesta_correcta": "París",
+            "nivel": "facil"
+        },
+        {
+            "pregunta": "¿Qué planeta es conocido como el planeta rojo?",
+            "opciones": ["Venus", "Marte", "Júpiter", "Saturno"],
+            "respuesta_correcta": "Marte",
+            "nivel": "facil"
+        },
+        {
+            "pregunta": "¿Cuál es el proceso por el cual las plantas convierten la luz en energía?",
+            "opciones": ["Respiración", "Fotosíntesis", "Transpiración", "Digestión"],
+            "respuesta_correcta": "Fotosíntesis",
+            "nivel": "facil"
+        },
+        {
+            "pregunta": "¿Quién pintó la Mona Lisa?",
+            "opciones": ["Pablo Picasso", "Leonardo da Vinci", "Miguel Ángel", "Donatello"],
+            "respuesta_correcta": "Leonardo da Vinci",
+            "nivel": "facil"
+        },
+        {
+            "pregunta": "¿Cuál es el número pi aproximado?",
+            "opciones": ["3.14", "2.71", "1.618", "1.414"],
+            "respuesta_correcta": "3.14",
+            "nivel": "facil"
+        },
+        {
+            "pregunta": "¿En qué año se independizó México de España?",
+            "opciones": ["1810", "1821", "1835", "1848"],
+            "respuesta_correcta": "1821",
+            "nivel": "media"
+        },
+        {
+            "pregunta": "¿Cuál es el elemento químico con número atómico 1?",
+            "opciones": ["Hidrógeno", "Helio", "Litio", "Carbono"],
+            "respuesta_correcta": "Hidrógeno",
+            "nivel": "media"
+        },
+        {
+            "pregunta": "¿Qué río atraviesa a Egipto?",
+            "opciones": ["Nilo", "Amazonas", "Mississippi", "Sena"],
+            "respuesta_correcta": "Nilo",
+            "nivel": "media"
+        },
+        {
+            "pregunta": "¿Quién escribió 'Don Quijote de la Mancha'?",
+            "opciones": ["Gabriel García Márquez", "Miguel de Cervantes", "William Shakespeare", "Jorge Luis Borges"],
+            "respuesta_correcta": "Miguel de Cervantes",
+            "nivel": "media"
+        },
+        {
+            "pregunta": "¿Cuál es la velocidad aproximada de la luz en el vacío?",
+            "opciones": ["300,000 km/s", "150,000 km/s", "1,000,000 km/s", "30,000 km/s"],
+            "respuesta_correcta": "300,000 km/s",
+            "nivel": "media"
+        },
+        {
+            "pregunta": "¿Qué filósofo griego es conocido por su afirmación 'Pienso, luego existo'?",
+            "opciones": ["Aristóteles", "Platón", "Descartes", "Sócrates"],
+            "respuesta_correcta": "Descartes",
+            "nivel": "dificil"
+        },
+        {
+            "pregunta": "¿Cuál es el teorema que establece a^2 + b^2 = c^2?",
+            "opciones": ["Teorema de Pitágoras", "Teorema de Tales", "Teorema de Euclides", "Teorema de Bolzano"],
+            "respuesta_correcta": "Teorema de Pitágoras",
+            "nivel": "dificil"
+        },
+        {
+            "pregunta": "¿Qué evento marcó el inicio de la Segunda Guerra Mundial?",
+            "opciones": ["Asesinato de Sarajevo", "Invasión de Polonia", "Bombardeo de Pearl Harbor", "Revolución Francesa"],
+            "respuesta_correcta": "Invasión de Polonia",
+            "nivel": "dificil"
+        },
+        {
+            "pregunta": "¿Cuál es la célula de la respuesta inmune adaptativa?",
+            "opciones": ["Neutrófilos", "Linfocitos", "Eritrocitos", "Plaquetas"],
+            "respuesta_correcta": "Linfocitos",
+            "nivel": "dificil"
+        },
+        {
+            "pregunta": "¿Qué significa HTTP en internet?",
+            "opciones": ["Hyper Text Transfer Protocol", "High Transfer Text Protocol", "Home Tool Transfer Protocol", "Hyper Tool Text Process"],
+            "respuesta_correcta": "Hyper Text Transfer Protocol",
+            "nivel": "dificil"
+        },
+        {
+            "pregunta": "¿Cuál es la velocidad angular de escape de un agujero negro de Schwarzschild?",
+            "opciones": ["c", "2c", "c/2", "c^2"],
+            "respuesta_correcta": "c",
+            "nivel": "ultra_dificil"
+        },
+        {
+            "pregunta": "¿Qué postulado de Euclides fue cuestionado en la geometría no euclidiana?",
+            "opciones": ["El postulado de las paralelas", "El postulado de los segmentos", "El postulado de las rectas", "El postulado de los ángulos"],
+            "respuesta_correcta": "El postulado de las paralelas",
+            "nivel": "ultra_dificil"
+        },
+        {
+            "pregunta": "¿Cuál es el número de catalizadores de la conjetura de Collatz?",
+            "opciones": ["Infinitos", "Finitos", "Desconocido", "Uno"],
+            "respuesta_correcta": "Desconocido",
+            "nivel": "ultra_dificil"
+        },
+        {
+            "pregunta": "¿Qué principio físico rige la termodinámica estadística en el ensamble de Gibbs?",
+            "opciones": ["Principio de mínima energía", "Principio de máxima entropía", "Principio de superposición", "Principio de exclusión de Pauli"],
+            "respuesta_correcta": "Principio de máxima entropía",
+            "nivel": "ultra_dificil"
+        },
+        {
+            "pregunta": "¿Cuál es la dimensión del espacio de Hilbert del átomo de hidrógeno?",
+            "opciones": ["3", "4", "Infinita", "2"],
+            "respuesta_correcta": "Infinita",
+            "nivel": "ultra_dificil"
+        }
+    ]
+}

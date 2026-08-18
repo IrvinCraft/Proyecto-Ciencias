@@ -1,0 +1,18 @@
+{
+    "num_questions": 10,
+    "levels": [
+        "facil",
+        "media",
+        "dificil",
+        "ultra_dificil"
+    ],
+    "points": {
+        "facil": 10,
+        "media": 20,
+        "dificil": 30,
+        "ultra_dificil": 50
+    },
+    "time_per_question": 15.0,
+    "unlimited_time": false,
+    "question_file": "/home/irvinperez/Descargas/Proyecto Ciencias/csv/2026-08-13_20-52-41/questions.csv"
+}

@@ -1,0 +1,5 @@
+# En la mayoria de equipos:
+pygame>=2.5.0
+# Si tu Python es muy nuevo (3.13+/3.14) y pygame no tiene binario,
+# usa la version comunitaria (misma API, el codigo no cambia):
+# pygame-ce>=2.5.0
