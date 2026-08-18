@@ -89,6 +89,11 @@ SECONDARY_BG = (42, 52, 82)
 SECONDARY_HOVER = (58, 70, 108)
 SECONDARY_BORDER = (108, 118, 150)
 
+# Accion destructiva (modal de confirmacion de salida)
+DANGER_BG = (165, 55, 45)
+DANGER_HOVER = (195, 70, 58)
+DANGER_BORDER = INCORRECT_RED
+
 # Colores de los badges de dificultad
 BADGE_COLORS = {
     "facil": CORRECT_GREEN,
@@ -209,6 +214,9 @@ class Button:
         if self.variant == "secondary":
             color = SECONDARY_HOVER if (self.hovered and self.enabled) else SECONDARY_BG
             border = SECONDARY_BORDER
+        elif self.variant == "danger":
+            color = DANGER_HOVER if (self.hovered and self.enabled) else DANGER_BG
+            border = DANGER_BORDER
         else:
             color = self.hover if (self.hovered and self.enabled) else self.bg
             border = ACCENT
@@ -582,6 +590,7 @@ class Game:
         self.show_next_button = False
         self.correct_index = None    # indice de la opcion correcta (feedback)
         self.selected_index = None   # indice de la opcion elegida (feedback)
+        self.exit_confirm = False    # modal "salir del quiz" abierto
 
         # Fuentes y UI
         self.space = SpaceBackground()
@@ -890,6 +899,25 @@ class Game:
             (w - 152 - HUD_PADDING, self._top_bar_height() + HUD_PADDING,
              152, 42),
             "Salir", self.font_small, variant="secondary"
+        )
+
+        # Modal de confirmacion de salida (overlay independiente del fade):
+        # caja centrada con mensaje y dos botones (destructivo / neutro).
+        modal_w = min(560, int(w * 0.72))
+        modal_h = int(max(200, min(230, h * 0.30)))
+        self.exit_confirm_box = pygame.Rect(
+            (w - modal_w) // 2, (h - modal_h) // 2, modal_w, modal_h
+        )
+        self.btn_exit_yes = Button(
+            (self.exit_confirm_box.centerx - 215,
+             self.exit_confirm_box.bottom - 66, 170, 42),
+            "Si, salir", self.font_medium,
+            bg=DANGER_BG, hover=DANGER_HOVER, variant="danger"
+        )
+        self.btn_exit_no = Button(
+            (self.exit_confirm_box.centerx + 45,
+             self.exit_confirm_box.bottom - 66, 170, 42),
+            "Cancelar", self.font_medium, variant="secondary"
         )
 
     def _build_error_screen(self):
@@ -1281,6 +1309,27 @@ class Game:
         # Boton para salir de la prueba en cualquier momento
         self.btn_quiz_exit.draw(self.screen)
 
+    def _draw_exit_confirm_modal(self):
+        """Overlay de confirmacion de salida: se dibuja SIEMPRE encima de todo
+        (se llama tras _draw_fade), por lo que no interfiere con el fade."""
+        overlay = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 150))
+        self.screen.blit(overlay, (0, 0))
+
+        box = self.exit_confirm_box
+        pygame.draw.rect(self.screen, PANEL, box, border_radius=14)
+        pygame.draw.rect(self.screen, ACCENT, box, 2, border_radius=14)
+
+        titulo = self.font_medium.render("¿Seguro que deseas salir?",
+                                         True, TEXT_LIGHT)
+        sub = self.font_small.render("Perderas tu progreso en este quiz.",
+                                     True, TEXT_MUTED)
+        self.screen.blit(titulo, titulo.get_rect(center=(box.centerx, box.y + 48)))
+        self.screen.blit(sub, sub.get_rect(center=(box.centerx, box.y + 82)))
+
+        self.btn_exit_yes.draw(self.screen)
+        self.btn_exit_no.draw(self.screen)
+
     def _draw_wrapped_text(self, text, font, color, x, y, max_width, max_height):
         """Dibuja texto envuelto dentro de un rectangulo."""
         words = text.split(" ")
@@ -1440,7 +1489,8 @@ class Game:
                         self._handle_update_event(event)
 
                 # Actualizaciones continuas
-                if self.screen_state == SCREEN_QUIZ and self.quiz:
+                if (self.screen_state == SCREEN_QUIZ and self.quiz
+                        and not self.exit_confirm):
                     self._update_quiz(dt)
 
                 # Dibujar
@@ -2150,9 +2200,15 @@ class Game:
             self._start_quiz_from_settings()
 
     def _handle_quiz_event(self, event):
-        # Salir de la prueba en cualquier momento
+        # El modal de confirmacion captura toda la entrada mientras esta abierto
+        if self.exit_confirm:
+            self._handle_exit_confirm_event(event)
+            return
+
+        # Salir de la prueba en cualquier momento (con confirmacion previa)
         if self.btn_quiz_exit.handle_event(event):
-            self._exit_quiz()
+            self.sounds.play("click")
+            self.exit_confirm = True
             return
 
         if self.show_next_button and self.btn_next.handle_event(event):
@@ -2193,6 +2249,23 @@ class Game:
                     ob.enabled = False
                 self.flash_timer = self.flash_duration
                 self.show_next_button = True
+
+    def _handle_exit_confirm_event(self, event):
+        """Gestiona la entrada mientras el modal de confirmacion esta abierto.
+        El overlay captura primero: clics fuera de la caja cancelan el modal."""
+        if self.btn_exit_yes.handle_event(event):
+            self.sounds.play("click")
+            self.exit_confirm = False
+            self._exit_quiz()
+            return
+        if self.btn_exit_no.handle_event(event):
+            self.sounds.play("click")
+            self.exit_confirm = False
+            return
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if not self.exit_confirm_box.collidepoint(event.pos):
+                self.sounds.play("click")
+                self.exit_confirm = False
 
     def _handle_results_event(self, event):
         if self.btn_retry.handle_event(event):
@@ -2333,6 +2406,7 @@ class Game:
         self.show_next_button = False
         self.correct_index = None
         self.selected_index = None
+        self.exit_confirm = False
 
         self.screen_state = SCREEN_QUIZ
 
@@ -2355,6 +2429,7 @@ class Game:
                         self.quiz.question_number, self.quiz.num_questions)
         self.sounds.play("click")
         self.settings_warning = ""
+        self.exit_confirm = False
         self.quiz = None
         self.fade_alpha = 0
         self.fade_direction = 0
@@ -2438,6 +2513,10 @@ class Game:
             self.draw_update_screen()
 
         self._draw_fade()
+
+        # Modal de confirmacion de salida: sobre el fade (overlay independiente)
+        if self.screen_state == SCREEN_QUIZ and self.exit_confirm:
+            self._draw_exit_confirm_modal()
 
 
 # ---------------------------------------------------------------------------
