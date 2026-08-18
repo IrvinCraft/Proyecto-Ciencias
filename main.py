@@ -216,6 +216,13 @@ class Button:
         pygame.draw.rect(surface, border, self.rect, 2, border_radius=8)
         surface.blit(self.text_surf, self.text_rect)
 
+    def draw_colored(self, surface, bg, border):
+        """Dibuja el boton con colores concretos (ignora hover: feedback de
+        respuesta verde/rojo en las opciones del quiz)."""
+        pygame.draw.rect(surface, bg, self.rect, border_radius=8)
+        pygame.draw.rect(surface, border, self.rect, 2, border_radius=8)
+        surface.blit(self.text_surf, self.text_rect)
+
     def handle_event(self, event):
         if not self.enabled:
             return False
@@ -573,6 +580,8 @@ class Game:
         self.flash_timer = 0.0
         self.flash_duration = 0.5
         self.show_next_button = False
+        self.correct_index = None    # indice de la opcion correcta (feedback)
+        self.selected_index = None   # indice de la opcion elegida (feedback)
 
         # Fuentes y UI
         self.space = SpaceBackground()
@@ -1009,10 +1018,19 @@ class Game:
                 color = TEXT_LIGHT
             timer_text = f"Tiempo: {remaining:.1f}s"
         timer_surf = self.font_medium.render(timer_text, True, color)
+        # Ancla FIJA del cronometro: el centro del HUD (self.width // 2),
+        # independiente del ancho del string renderizado. Asi el texto no se
+        # desplaza al cambiar de "Tiempo: Xs" a "Respondiste en: Xs".
+        anchor = self.width // 2
+        timer_x = anchor - timer_surf.get_width() // 2
+        # Clamp de seguridad: solo si el texto desbordaria el espacio libre
+        # entre puntaje/racha y progreso (ventanas estrechas).
         left_bound = HUD_PADDING + score_surf.get_width() + streak_w + HUD_PADDING
         right_bound = max(left_bound, prog_x - HUD_PADDING)
-        timer_x = left_bound + (right_bound - left_bound - timer_surf.get_width()) // 2
-        timer_x = max(HUD_PADDING, min(timer_x, right_bound - timer_surf.get_width()))
+        if timer_x < left_bound:
+            timer_x = left_bound
+        if timer_x + timer_surf.get_width() > right_bound:
+            timer_x = max(left_bound, right_bound - timer_surf.get_width())
         self.screen.blit(timer_surf, (timer_x, top_y))
 
     def _draw_streak(self, x, y_center, streak):
@@ -1243,10 +1261,18 @@ class Game:
 
         # Botones de opciones
         labels = ["A", "B", "C", "D"]
+        answered = self.quiz.answer_result is not None
         for i, btn in enumerate(self.option_buttons):
             btn.text = f"{labels[i]}. {q.opciones[i]}"
             btn._render()
-            btn.draw(self.screen)
+            if not answered:
+                btn.draw(self.screen)
+            elif i == self.correct_index:
+                btn.draw_colored(self.screen, (30, 120, 75), CORRECT_GREEN)
+            elif i == self.selected_index:
+                btn.draw_colored(self.screen, (140, 50, 45), INCORRECT_RED)
+            else:
+                btn.draw_colored(self.screen, BUTTON, SECONDARY_BORDER)
 
         # Boton Siguiente (solo visible despues de responder)
         if self.show_next_button:
@@ -2159,6 +2185,12 @@ class Game:
                 else:
                     self.flash_color = INCORRECT_RED
                     self.sounds.play("error")
+                # Feedback immediate de opciones: verde la correcta, roja la
+                # elegida (si es incorrecta); el resto queda neutro.
+                self.correct_index = q.indice_correcto()
+                self.selected_index = btn.index
+                for ob in self.option_buttons:
+                    ob.enabled = False
                 self.flash_timer = self.flash_duration
                 self.show_next_button = True
 
@@ -2299,6 +2331,8 @@ class Game:
         self.flash_color = None
         self.flash_timer = 0
         self.show_next_button = False
+        self.correct_index = None
+        self.selected_index = None
 
         self.screen_state = SCREEN_QUIZ
 
@@ -2365,6 +2399,11 @@ class Game:
                     self.quiz.time_per_question if not self.quiz.unlimited_time else None
                 )
                 self.quiz.question_time = 0.0
+                # Nueva pregunta visible: opciones activas y feedback limpio
+                self.correct_index = None
+                self.selected_index = None
+                for ob in self.option_buttons:
+                    ob.enabled = True
         else:
             # Cronometro normal (solo cuando no hay transicion)
             before = self.quiz.answer_result
@@ -2375,6 +2414,11 @@ class Game:
                 self.sounds.play("error")
                 self.flash_timer = self.flash_duration
                 self.show_next_button = True
+                # Al acabarse el tiempo, marcar en verde la opcion correcta
+                self.correct_index = self.quiz.current_question.indice_correcto()
+                self.selected_index = None
+                for ob in self.option_buttons:
+                    ob.enabled = False
 
     def _draw_current_screen(self):
         """Dibuja la pantalla segun el estado actual."""
