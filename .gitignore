@@ -2,3 +2,7 @@ __pycache__/
 *.pyc
 quiz.log
 .~lock.*
+build/
+dist/
+*.spec
+update_tmp/

@@ -1,0 +1,60 @@
+name: Build EXE
+
+# Compila automaticamente un .exe de Windows (QuizEducativo) con PyInstaller
+# cada vez que se publica un tag de version (v1.0.0, v1.0.1, ...) y lo sube
+# como asset del release correspondiente en GitHub.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Generar QuizEducativo.exe
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout del codigo
+        uses: actions/checkout@v4
+
+      - name: Configurar Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Inyectar la version del tag en la app
+        shell: pwsh
+        run: |
+          $ver = $env:GITHUB_REF_NAME -replace '^v',''
+          Write-Host "Version de build: $ver"
+          $content = Get-Content updater.py -Raw
+          $new = [regex]::Replace($content, 'VERSION = "[^" ]*"', "VERSION = `"$ver`"")
+          Set-Content updater.py -Value $new -Encoding utf8
+
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Compilar el .exe con PyInstaller
+        run: |
+          pyinstaller --noconfirm --onefile --clean --name QuizEducativo `
+            --add-data "assets;assets" `
+            --add-data "questions.csv;." `
+            main.py
+
+      - name: Verificar artefacto
+        run: Get-ChildItem dist
+
+      - name: Publicar el .exe en el release del tag
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          files: dist/QuizEducativo.exe
+          generate_release_notes: true

@@ -25,13 +25,14 @@ sys.path.insert(0, BASE_DIR)
 from quiz_logic import QuestionLoader, Quiz, VALID_LEVELS
 from settings import Settings
 from question_bank import import_csv_to_bank, list_sessions
+from paths import data_dir, resource_dir
 import updater as updater_mod
 from updater import VERSION as APP_VERSION
 
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
-LOG_FILE = os.path.join(BASE_DIR, "quiz.log")
+LOG_FILE = os.path.join(data_dir(), "quiz.log")
 logging.basicConfig(
     level=logging.DEBUG,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -508,7 +509,7 @@ class Game:
         logger.info("Ventana %dx%d (RESIZABLE) creada", self.width, self.height)
 
         # Sonidos
-        sounds_dir = os.path.join(BASE_DIR, "assets", "sounds")
+        sounds_dir = os.path.join(resource_dir(), "assets", "sounds")
         self.sounds = SoundManager(sounds_dir)
         logger.info("Cargados %d sonidos", len(self.sounds.sounds))
 
@@ -2050,9 +2051,12 @@ class Game:
     def _prepare_questions(self):
         """Carga y filtra las preguntas segun la configuracion actual."""
         qfile = self.settings.question_file
-        filepath = os.path.join(BASE_DIR, qfile)
+        if os.path.isabs(qfile):
+            filepath = qfile
+        else:
+            filepath = os.path.join(data_dir(), qfile)
         if not os.path.exists(filepath):
-            filepath = os.path.join(BASE_DIR, "questions.csv")
+            filepath = os.path.join(resource_dir(), "questions.csv")
         try:
             all_questions, _ = QuestionLoader.load_lenient(filepath)
         except Exception as e:

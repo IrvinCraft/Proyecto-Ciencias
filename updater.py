@@ -22,6 +22,7 @@ import logging
 import os
 import re
 import shutil
+import sys
 import tempfile
 import urllib.error
 import urllib.request
@@ -65,15 +66,28 @@ def _gh_token():
     """Busca el token de GitHub configurado por el CLI 'gh'.
 
     Necesario cuando el repositorio es PRIVADO (las descargas anonimas dan 404
-    en repos privados). Lee ~/.config/gh/hosts.yml con un mini-parser (sin
-    dependencias). Devuelve una cadena o None si no existe.
+    en repos privados). Revisa las rutas del CLI de gh en Linux/mac y Windows
+    con un mini-parser (sin dependencias). Devuelve una cadena o None.
     """
-    try:
-        path = os.path.join(os.path.expanduser("~"), ".config", "gh", "hosts.yml")
-        with open(path, "r", encoding="utf-8") as fh:
-            lines = fh.read().splitlines()
-    except Exception:
+    candidates = []
+    if sys.platform == "win32":
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            candidates.append(os.path.join(appdata, "GitHub CLI", "hosts.yml"))
+    else:
+        candidates.append(os.path.join(os.path.expanduser("~"), ".config", "gh", "hosts.yml"))
+
+    lines = None
+    for path in candidates:
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                lines = fh.read().splitlines()
+            break
+        except Exception:
+            continue
+    if lines is None:
         return None
+
     in_core = False
     for line in lines:
         stripped = line.strip()
@@ -157,7 +171,16 @@ def apply_update(zip_url, new_version):
     Extrae el zip a una carpeta temporal, copia los archivos del proyecto
     sobre la instalacion actual saltando los datos preservados del usuario,
     y limpia los .pyc viejos. Devuelve (nueva_version, mensaje).
+
+    En la version compilada (exe) no se puede sobrescribir el ejecutable en
+    marcha; se indica que la actualizacion se descarga desde GitHub Releases.
     """
+    if getattr(sys, "frozen", False):
+        raise UpdateError(
+            "Esta version empaquetada (.exe) se actualiza descargando el "
+            "nuevo QuizEducativo.exe desde GitHub Releases"
+        )
+
     base_dir = os.path.dirname(os.path.abspath(__file__))
     tmp = tempfile.mkdtemp(prefix="quiz_update_")
     zip_path = os.path.join(tmp, "update.zip")

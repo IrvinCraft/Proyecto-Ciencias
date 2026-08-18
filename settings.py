@@ -9,12 +9,11 @@ import os
 import logging
 
 from quiz_logic import VALID_LEVELS
+from paths import data_dir
 
 logger = logging.getLogger("quiz.settings")
 
-DEFAULT_CONFIG_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "config.json"
-)
+DEFAULT_CONFIG_PATH = os.path.join(data_dir(), "config.json")
 
 DEFAULTS = {
     "num_questions": 10,

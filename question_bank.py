@@ -16,11 +16,11 @@ import logging
 from datetime import datetime
 
 from quiz_logic import QuestionLoader
+from paths import data_dir
 
 logger = logging.getLogger("quiz.bank")
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-BANK_DIR = os.path.join(BASE_DIR, "csv")
+BANK_DIR = os.path.join(data_dir(), "csv")
 
 
 def ensure_bank_dir():
