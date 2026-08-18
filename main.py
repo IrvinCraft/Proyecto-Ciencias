@@ -827,6 +827,13 @@ class Game:
         )
         self.btn_next.enabled = True
 
+        # Salir de la prueba en cualquier momento (esquina superior derecha,
+        # justo debajo de la barra superior)
+        self.btn_quiz_exit = Button(
+            (w - 176, int(h * 0.065), 152, 42),
+            "Salir", self.font_small
+        )
+
     def _build_error_screen(self):
         """Crea botones para la pantalla de error."""
         self.btn_back_to_settings = Button(
@@ -1104,6 +1111,9 @@ class Game:
         # Boton Siguiente (solo visible despues de responder)
         if self.show_next_button:
             self.btn_next.draw(self.screen)
+
+        # Boton para salir de la prueba en cualquier momento
+        self.btn_quiz_exit.draw(self.screen)
 
     def _draw_wrapped_text(self, text, font, color, x, y, max_width, max_height):
         """Dibuja texto envuelto dentro de un rectangulo."""
@@ -1974,6 +1984,11 @@ class Game:
             self._start_quiz_from_settings()
 
     def _handle_quiz_event(self, event):
+        # Salir de la prueba en cualquier momento
+        if self.btn_quiz_exit.handle_event(event):
+            self._exit_quiz()
+            return
+
         if self.show_next_button and self.btn_next.handle_event(event):
             self.sounds.play("click")
             self._next_question()
@@ -2158,6 +2173,22 @@ class Game:
         self.pending_next = True
         self.fade_alpha = 0
         self.fade_direction = +1  # fade out (a negro) sobre la pregunta actual
+
+    def _exit_quiz(self):
+        """Abandona la prueba en cualquier momento y vuelve a los ajustes."""
+        if self.quiz is not None:
+            logger.info("Abandonando la prueba en la pregunta %d de %d",
+                        self.quiz.question_number, self.quiz.num_questions)
+        self.sounds.play("click")
+        self.settings_warning = ""
+        self.quiz = None
+        self.fade_alpha = 0
+        self.fade_direction = 0
+        self.pending_next = False
+        self.flash_color = None
+        self.flash_timer = 0
+        self.show_next_button = False
+        self.screen_state = SCREEN_SETTINGS
 
     def _update_quiz(self, dt):
         """Actualiza cronometro, animaciones y estado del quiz."""
