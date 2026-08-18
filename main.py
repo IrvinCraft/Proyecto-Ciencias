@@ -22,7 +22,10 @@ import pygame
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE_DIR)
 
-from quiz_logic import QuestionLoader, Quiz, VALID_LEVELS
+from quiz_logic import (
+    QuestionLoader, Quiz, VALID_LEVELS,
+    save_progress, load_progress, clear_progress, resume_quiz,
+)
 from settings import Settings
 from question_bank import import_csv_to_bank, list_sessions
 from paths import data_dir, resource_dir
@@ -94,6 +97,11 @@ DANGER_BG = (165, 55, 45)
 DANGER_HOVER = (195, 70, 58)
 DANGER_BORDER = INCORRECT_RED
 
+# Accion positiva/recomendada (guardar progreso)
+POSITIVE_BG = (40, 130, 80)
+POSITIVE_HOVER = (52, 160, 100)
+POSITIVE_BORDER = CORRECT_GREEN
+
 # Colores de los badges de dificultad
 BADGE_COLORS = {
     "facil": CORRECT_GREEN,
@@ -104,6 +112,9 @@ BADGE_COLORS = {
 
 # Margen minimo entre elementos del HUD (pantalla SCREEN_QUIZ)
 HUD_PADDING = 20
+
+# Progreso guardado de un quiz a medio terminar (datos del usuario)
+PROGRESS_PATH = os.path.join(data_dir(), "progress.json")
 
 # Niveles de dificultad y sus etiquetas
 LEVEL_LABELS = {
@@ -217,6 +228,9 @@ class Button:
         elif self.variant == "danger":
             color = DANGER_HOVER if (self.hovered and self.enabled) else DANGER_BG
             border = DANGER_BORDER
+        elif self.variant == "positive":
+            color = POSITIVE_HOVER if (self.hovered and self.enabled) else POSITIVE_BG
+            border = POSITIVE_BORDER
         else:
             color = self.hover if (self.hovered and self.enabled) else self.bg
             border = ACCENT
@@ -667,29 +681,63 @@ class Game:
 
     # -- builders de pantallas ------------------------------------------------
     def _build_start_screen(self):
-        """Crea los elementos de la pantalla de inicio (3 botones apilados)."""
+        """Crea los elementos de la pantalla de inicio (botones apilados)."""
         w, h = self.width, self.height
-        btn_w, btn_h = 240, int(max(46, min(60, h * 0.075)))
-        gap = int(max(22, min(34, h * 0.042)))
+        with_progress = os.path.exists(PROGRESS_PATH)
+        if with_progress:
+            # Un boton mas en el apilado: compactar para que quepan todos
+            btn_h = int(max(40, min(52, h * 0.062)))
+            gap = int(max(14, min(24, h * 0.030)))
+        else:
+            btn_h = int(max(46, min(60, h * 0.075)))
+            gap = int(max(22, min(34, h * 0.042)))
+        btn_w = 240
         cx = w // 2
         btn_top = int(h * 0.30) + 130  # debajo del titulo/subtitulo
         btn_x = cx - btn_w // 2
-        self.btn_start = Button(
-            (btn_x, btn_top, btn_w, btn_h),
-            "Comenzar Quiz", self.font_large
-        )
-        self.btn_settings = Button(
-            (btn_x, btn_top + (btn_h + gap), btn_w, btn_h),
-            "Ajustes", self.font_medium
-        )
-        self.btn_quit = Button(
-            (btn_x, btn_top + 2 * (btn_h + gap), btn_w, btn_h),
-            "Salir", self.font_medium
-        )
-        self.btn_update = Button(
-            (btn_x, btn_top + 3 * (btn_h + gap), btn_w, btn_h),
-            "Actualizaciones", self.font_medium
-        )
+        step = btn_h + gap
+
+        if with_progress:
+            # 5 botones visibles: "Continuar" arriba y el resto debajo
+            self.btn_continue = Button(
+                (btn_x, btn_top, btn_w, btn_h),
+                "Continuar quiz guardado", self.font_medium,
+                bg=POSITIVE_BG, hover=POSITIVE_HOVER, variant="positive"
+            )
+            self.btn_start = Button(
+                (btn_x, btn_top + step, btn_w, btn_h), "Comenzar Quiz", self.font_large
+            )
+            self.btn_settings = Button(
+                (btn_x, btn_top + 2 * step, btn_w, btn_h), "Ajustes", self.font_medium
+            )
+            self.btn_quit = Button(
+                (btn_x, btn_top + 3 * step, btn_w, btn_h), "Salir", self.font_medium
+            )
+            self.btn_update = Button(
+                (btn_x, btn_top + 4 * step, btn_w, btn_h),
+                "Actualizaciones", self.font_medium
+            )
+        else:
+            # 4 botones visibles (el de continuar queda oculto en la misma
+            # posicion del primero para no perder las referencias).
+            self.btn_continue = Button(
+                (btn_x, btn_top, btn_w, btn_h),
+                "Continuar quiz guardado", self.font_medium,
+                bg=POSITIVE_BG, hover=POSITIVE_HOVER, variant="positive"
+            )
+            self.btn_start = Button(
+                (btn_x, btn_top, btn_w, btn_h), "Comenzar Quiz", self.font_large
+            )
+            self.btn_settings = Button(
+                (btn_x, btn_top + step, btn_w, btn_h), "Ajustes", self.font_medium
+            )
+            self.btn_quit = Button(
+                (btn_x, btn_top + 2 * step, btn_w, btn_h), "Salir", self.font_medium
+            )
+            self.btn_update = Button(
+                (btn_x, btn_top + 3 * step, btn_w, btn_h),
+                "Actualizaciones", self.font_medium
+            )
 
     def _build_start_overlay(self):
         """Capa semitransparente vertical para legibilidad sobre el fondo animado."""
@@ -902,22 +950,30 @@ class Game:
         )
 
         # Modal de confirmacion de salida (overlay independiente del fade):
-        # caja centrada con mensaje y dos botones (destructivo / neutro).
-        modal_w = min(560, int(w * 0.72))
-        modal_h = int(max(200, min(230, h * 0.30)))
+        # caja centrada con mensaje, X de cierre y dos acciones
+        # (guardar progreso / salir sin guardar).
+        modal_w = min(600, int(w * 0.78))
+        modal_h = int(max(210, min(240, h * 0.32)))
         self.exit_confirm_box = pygame.Rect(
             (w - modal_w) // 2, (h - modal_h) // 2, modal_w, modal_h
         )
-        self.btn_exit_yes = Button(
-            (self.exit_confirm_box.centerx - 215,
-             self.exit_confirm_box.bottom - 66, 170, 42),
-            "Si, salir", self.font_medium,
+        box = self.exit_confirm_box
+        act_h = 44
+        act_w = (box.width - 3 * HUD_PADDING) // 2
+        act_y = box.bottom - act_h - HUD_PADDING
+        self.btn_exit_save = Button(
+            (box.x + HUD_PADDING, act_y, act_w, act_h),
+            "Guardar y salir", self.font_medium,
+            bg=POSITIVE_BG, hover=POSITIVE_HOVER, variant="positive"
+        )
+        self.btn_exit_unsave = Button(
+            (box.right - HUD_PADDING - act_w, act_y, act_w, act_h),
+            "Salir sin guardar", self.font_medium,
             bg=DANGER_BG, hover=DANGER_HOVER, variant="danger"
         )
-        self.btn_exit_no = Button(
-            (self.exit_confirm_box.centerx + 45,
-             self.exit_confirm_box.bottom - 66, 170, 42),
-            "Cancelar", self.font_medium, variant="secondary"
+        self.btn_exit_x = Button(
+            (box.right - 38, box.y + 10, 28, 28),
+            "X", self.font_small, variant="secondary"
         )
 
     def _build_error_screen(self):
@@ -1134,6 +1190,8 @@ class Game:
         )
         self.screen.blit(subtitle, (self.width // 2 - subtitle.get_width() // 2, ty + 90))
 
+        if os.path.exists(PROGRESS_PATH):
+            self.btn_continue.draw(self.screen)
         self.btn_start.draw(self.screen)
         self.btn_settings.draw(self.screen)
         self.btn_quit.draw(self.screen)
@@ -1322,13 +1380,15 @@ class Game:
 
         titulo = self.font_medium.render("¿Seguro que deseas salir?",
                                          True, TEXT_LIGHT)
-        sub = self.font_small.render("Perderas tu progreso en este quiz.",
-                                     True, TEXT_MUTED)
-        self.screen.blit(titulo, titulo.get_rect(center=(box.centerx, box.y + 48)))
-        self.screen.blit(sub, sub.get_rect(center=(box.centerx, box.y + 82)))
+        sub = self.font_small.render(
+            "Elige guardar tu progreso o descartarlo.", True, TEXT_MUTED
+        )
+        self.screen.blit(titulo, titulo.get_rect(center=(box.centerx, box.y + 46)))
+        self.screen.blit(sub, sub.get_rect(center=(box.centerx, box.y + 80)))
 
-        self.btn_exit_yes.draw(self.screen)
-        self.btn_exit_no.draw(self.screen)
+        self.btn_exit_x.draw(self.screen)
+        self.btn_exit_save.draw(self.screen)
+        self.btn_exit_unsave.draw(self.screen)
 
     def _draw_wrapped_text(self, text, font, color, x, y, max_width, max_height):
         """Dibuja texto envuelto dentro de un rectangulo."""
@@ -1526,6 +1586,10 @@ class Game:
 
     # -- event handlers ------------------------------------------------------
     def _handle_start_event(self, event):
+        if os.path.exists(PROGRESS_PATH) and self.btn_continue.handle_event(event):
+            self.sounds.play("click")
+            self._continue_saved_quiz()
+            return
         if self.btn_start.handle_event(event):
             self.sounds.play("click")
             self._open_import_screen()
@@ -2252,13 +2316,22 @@ class Game:
 
     def _handle_exit_confirm_event(self, event):
         """Gestiona la entrada mientras el modal de confirmacion esta abierto.
-        El overlay captura primero: clics fuera de la caja cancelan el modal."""
-        if self.btn_exit_yes.handle_event(event):
+        El overlay captura primero: X o ESC cancelan, clics fuera de la caja
+        cancelan, y las dos acciones guardan/salen sin guardar."""
+        if self.btn_exit_x.handle_event(event):
+            self.sounds.play("click")
+            self.exit_confirm = False
+            return
+        if self.btn_exit_save.handle_event(event):
+            self.sounds.play("click")
+            self._save_and_exit_quiz()
+            return
+        if self.btn_exit_unsave.handle_event(event):
             self.sounds.play("click")
             self.exit_confirm = False
             self._exit_quiz()
             return
-        if self.btn_exit_no.handle_event(event):
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
             self.sounds.play("click")
             self.exit_confirm = False
             return
@@ -2389,6 +2462,8 @@ class Game:
 
         self.sounds.play("start")
         self.quiz = Quiz(all_questions, self.settings.as_dict)
+        # Un quiz nuevo invalida cualquier progreso guardado anterior
+        clear_progress(PROGRESS_PATH)
         self._build_quiz_ui()
         logger.info(
             "Quiz iniciado: %d preguntas (niveles=%s) puntos=%s tiempo=%s ilimitado=%s",
@@ -2410,6 +2485,61 @@ class Game:
 
         self.screen_state = SCREEN_QUIZ
 
+    def _continue_saved_quiz(self):
+        """Reanuda un quiz guardado desde SCREEN_START (si hay progress.json)."""
+        data = load_progress(PROGRESS_PATH)
+        if not data:
+            logger.warning("No se encontro progreso guardado")
+            return
+        try:
+            self.quiz = resume_quiz(data)
+        except Exception:
+            logger.error("No se pudo reanudar el quiz:\n%s",
+                         traceback.format_exc())
+            clear_progress(PROGRESS_PATH)
+            self.error_message = (
+                "No se pudo cargar el progreso guardado. Revisa quiz.log."
+            )
+            self._build_error_screen()
+            self.screen_state = SCREEN_ERROR
+            return
+
+        self._build_quiz_ui()
+        self.sounds.play("start")
+
+        # Resetear animaciones (no tocar pending_next/fade_direction mas):
+        # quedan a 0; la transicion de pregunta sigue su flujo normal.
+        self.fade_alpha = 0
+        self.fade_direction = 0
+        self.pending_next = False
+        self.flash_color = None
+        self.flash_timer = 0
+        self.exit_confirm = False
+
+        # Si se guardo con la pregunta ya respondida, restaurar el feedback
+        # verde/rojo y dejar visible el "Siguiente".
+        if self.quiz.answer_result is not None:
+            q = self.quiz.current_question
+            ar = self.quiz.answer_result
+            self.correct_index = q.indice_correcto()
+            elegida = ar.get("respuesta_elegida")
+            self.selected_index = (
+                q.opciones.index(elegida) if elegida in q.opciones else None
+            )
+            for ob in self.option_buttons:
+                ob.enabled = False
+        else:
+            self.correct_index = None
+            self.selected_index = None
+            for ob in self.option_buttons:
+                ob.enabled = True
+        self.show_next_button = self.quiz.answer_result is not None
+
+        logger.info("Quiz reanudado en pregunta %d/%d (score=%d)",
+                    self.quiz.question_number, self.quiz.num_questions,
+                    self.quiz.score)
+        self.screen_state = SCREEN_QUIZ
+
     def _next_question(self):
         """Inicia la transicion de pregunta: fade out, avanza, fade in.
 
@@ -2422,8 +2552,9 @@ class Game:
         self.fade_alpha = 0
         self.fade_direction = +1  # fade out (a negro) sobre la pregunta actual
 
-    def _exit_quiz(self):
-        """Abandona la prueba en cualquier momento y vuelve a los ajustes."""
+    def _exit_quiz(self, dest=SCREEN_SETTINGS):
+        """Abandona la prueba en cualquier momento. Sin guardar nada.
+        Params: dest = pantalla a la que volver (default: ajustes)."""
         if self.quiz is not None:
             logger.info("Abandonando la prueba en la pregunta %d de %d",
                         self.quiz.question_number, self.quiz.num_questions)
@@ -2437,7 +2568,27 @@ class Game:
         self.flash_color = None
         self.flash_timer = 0
         self.show_next_button = False
-        self.screen_state = SCREEN_SETTINGS
+        self.screen_state = dest
+
+    def _save_and_exit_quiz(self):
+        """Guarda el progreso actual en data_dir()/progress.json y sale."""
+        if self.quiz is not None:
+            try:
+                save_progress(PROGRESS_PATH, self.quiz, self.settings.as_dict)
+                logger.info("Progreso guardado en %s", PROGRESS_PATH)
+            except Exception:
+                logger.error("No se pudo guardar el progreso:\n%s",
+                             traceback.format_exc())
+                self.error_message = (
+                    "No se pudo guardar el progreso. Revisa quiz.log."
+                )
+                self._build_error_screen()
+                self.exit_confirm = False
+                self.quiz = None
+                self.screen_state = SCREEN_ERROR
+                return
+        # "Guardar y salir" lleva al inicio, donde se ofrece continuar
+        self._exit_quiz(dest=SCREEN_START)
 
     def _update_quiz(self, dt):
         """Actualiza cronometro, animaciones y estado del quiz."""
@@ -2459,6 +2610,7 @@ class Game:
                     if self.quiz.game_over:
                         self.fade_alpha = 0
                         self.fade_direction = 0
+                        clear_progress(PROGRESS_PATH)
                         logger.info("Quiz terminado. Resumen: %s",
                                     self.quiz.get_summary())
                         self.sounds.play("celebration")

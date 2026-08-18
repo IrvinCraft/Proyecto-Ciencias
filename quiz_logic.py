@@ -408,3 +408,104 @@ class Quiz:
             "max_streak": self.max_streak,
             "stats": dict(self.stats),
         }
+
+
+# ---------------------------------------------------------------------------
+# Persistencia de progreso (reanudar un quiz a medio terminar)
+# ---------------------------------------------------------------------------
+PROGRESS_VERSION = 1
+
+
+def save_progress(filepath: str, quiz: Quiz, settings: dict) -> None:
+    """Guarda el estado del quiz para poder reanudarlo despues.
+
+    settings es el dict de configuracion (Settings.as_dict). El backup del
+    orden exacto de preguntas se incluye en el JSON, asi el resume no depende
+    de re-cargar el archivo CSV de nuevo.
+    """
+    data = {
+        "version": PROGRESS_VERSION,
+        "settings": dict(settings),
+        "questions": [
+            {
+                "pregunta": q.texto,
+                "opciones": list(q.opciones),
+                "respuesta_correcta": q.respuesta_correcta,
+                "nivel": q.nivel,
+            }
+            for q in quiz.questions
+        ],
+        "current_index": quiz.current_index,
+        "score": quiz.score,
+        "stats": quiz.stats,
+        "time_remaining": quiz.time_remaining,
+        "question_time": round(quiz.question_time, 3),
+        "total_time_used": round(quiz.total_time_used, 3),
+        "times_responded": [round(t, 3) for t in quiz.times_responded],
+        "answer_result": quiz.answer_result,
+        "current_streak": quiz.current_streak,
+        "max_streak": quiz.max_streak,
+    }
+    with open(filepath, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def load_progress(filepath: str) -> Optional[dict]:
+    """Carga el JSON de progreso. Devuelve None si no existe o esta corrupto."""
+    if not os.path.exists(filepath):
+        return None
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    return data
+
+
+def clear_progress(filepath: str) -> None:
+    """Borra el archivo de progreso si existe."""
+    if os.path.exists(filepath):
+        os.remove(filepath)
+
+
+def resume_quiz(data: dict) -> Quiz:
+    """Reconstruye un Quiz a partir del dict guardado por save_progress()."""
+    settings = dict(data.get("settings") or {})
+    questions = [
+        Question.from_dict(q) for q in (data.get("questions") or []) if isinstance(q, dict)
+    ]
+    if not questions:
+        raise ValueError("Progreso sin preguntas validas")
+
+    settings["num_questions"] = len(questions)
+    quiz = Quiz(questions, settings)
+    # Respetar el orden guardado (Quiz.__init__ barajaria de nuevo)
+    quiz.questions = questions
+    quiz.num_questions = len(questions)
+
+    quiz.current_index = max(0, min(int(data.get("current_index", 0)),
+                                    len(questions) - 1))
+    quiz.score = int(data.get("score", 0))
+
+    stats = data.get("stats") or {}
+    for lvl in VALID_LEVELS:
+        st = stats.get(lvl) or {}
+        quiz.stats[lvl]["correctas"] = int(st.get("correctas", 0))
+        quiz.stats[lvl]["incorrectas"] = int(st.get("incorrectas", 0))
+
+    tr = data.get("time_remaining")
+    quiz.time_remaining = tr if isinstance(tr, (int, float)) else \
+        settings.get("time_per_question")
+
+    quiz.question_time = float(data.get("question_time", 0.0))
+    quiz.total_time_used = float(data.get("total_time_used", 0.0))
+    quiz.times_responded = [float(t) for t in (data.get("times_responded") or [])]
+
+    ar = data.get("answer_result")
+    quiz.answer_result = ar if isinstance(ar, dict) else None
+
+    quiz.current_streak = int(data.get("current_streak", 0))
+    quiz.max_streak = int(data.get("max_streak", 0))
+    return quiz
