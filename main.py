@@ -531,8 +531,9 @@ class Game:
 
         # Animaciones
         self.fade_alpha = 0        # 0 = visible, 255 = negro total
-        self.fade_direction = 0    # -1 = fade out, +1 = fade in
-        self.fade_speed = 300      # px por segundo
+        self.fade_direction = 0    # +1 = fade out (a negro), -1 = fade in, 0 = idle
+        self.fade_speed = 300      # pixeles de alpha por segundo
+        self.pending_next = False  # True = hay que avanzar de pregunta en el negro
         self.flash_color = None    # (r,g,b) o None
         self.flash_timer = 0.0
         self.flash_duration = 0.5
@@ -2139,6 +2140,7 @@ class Game:
         # Resetear animaciones
         self.fade_alpha = 0
         self.fade_direction = 0
+        self.pending_next = False
         self.flash_color = None
         self.flash_timer = 0
         self.show_next_button = False
@@ -2146,18 +2148,16 @@ class Game:
         self.screen_state = SCREEN_QUIZ
 
     def _next_question(self):
-        """Avanza a la siguiente pregunta con animacion fade out/in."""
-        self.quiz.next_question()
-        if self.quiz.game_over:
-            logger.info("Quiz terminado. Resumen: %s", self.quiz.get_summary())
-            self.sounds.play("celebration")
-            self._build_results_screen()
-            self.screen_state = SCREEN_RESULTS
-        else:
-            self.show_next_button = False
-            # fade out: alpha sube de 0 a 255 hasta tapar la pantalla
-            self.fade_alpha = 0
-            self.fade_direction = +1
+        """Inicia la transicion de pregunta: fade out, avanza, fade in.
+
+        No avanza la pregunta de inmediato: primero el negro cubre la pregunta
+        respondida y, ya a negro total, se avanza en el bucle de actualizacion
+        para que la animacion coincida con el momento del clic.
+        """
+        self.show_next_button = False
+        self.pending_next = True
+        self.fade_alpha = 0
+        self.fade_direction = +1  # fade out (a negro) sobre la pregunta actual
 
     def _update_quiz(self, dt):
         """Actualiza cronometro, animaciones y estado del quiz."""
@@ -2167,10 +2167,24 @@ class Game:
             if self.flash_timer <= 0:
                 self.flash_color = None
 
-        # Durante el fade no se descuenta el cronometro (pausa de transicion)
+        # Transicion (fade out -> [avanza de pregunta] -> fade in).
+        # Durante el fade no se descuenta el cronometro (pausa de transicion).
         if self.fade_direction != 0:
             self.fade_alpha += self.fade_direction * self.fade_speed * dt
             if self.fade_alpha >= 255:
+                # Negro total alcanzado: aqui (y solo aqui) se avanza de pregunta
+                if self.pending_next:
+                    self.pending_next = False
+                    self.quiz.next_question()
+                    if self.quiz.game_over:
+                        self.fade_alpha = 0
+                        self.fade_direction = 0
+                        logger.info("Quiz terminado. Resumen: %s",
+                                    self.quiz.get_summary())
+                        self.sounds.play("celebration")
+                        self._build_results_screen()
+                        self.screen_state = SCREEN_RESULTS
+                        return
                 self.fade_alpha = 255
                 self.fade_direction = -1  # fade in: alpha baja hasta 0
             elif self.fade_alpha <= 0:
