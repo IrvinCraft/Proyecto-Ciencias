@@ -262,6 +262,10 @@ class Quiz:
             lvl: {"correctas": 0, "incorrectas": 0} for lvl in VALID_LEVELS
         }
 
+        # Racha de aciertos consecutivos (para el indicador de la UI)
+        self.current_streak = 0
+        self.max_streak = 0
+
     # -- seleccion de preguntas ----------------------------------------------
     def _distribute_questions(self) -> List[Question]:
         """Distribuye preguntas aproximadamente uniforme entre los niveles
@@ -319,6 +323,14 @@ class Quiz:
 
         self.stats[q.nivel]["correctas" if correct else "incorrectas"] += 1
 
+        # Racha de aciertos consecutivos
+        if correct:
+            self.current_streak += 1
+            if self.current_streak > self.max_streak:
+                self.max_streak = self.current_streak
+        else:
+            self.current_streak = 0
+
         self.answer_result = {
             "correcta": correct,
             "respuesta_elegida": opcion_elegida,
@@ -333,6 +345,7 @@ class Quiz:
         """Se acabo el tiempo: cuenta como incorrecta."""
         q = self.current_question
         self.stats[q.nivel]["incorrectas"] += 1
+        self.current_streak = 0  # el tiempo agotado corta la racha
         self.total_time_used += time_used
         self.times_responded.append(time_used)
         self.answer_result = {
@@ -392,5 +405,6 @@ class Quiz:
             "correctas": total_correct,
             "incorrectas": total_incorrect,
             "num_questions": self.num_questions,
+            "max_streak": self.max_streak,
             "stats": dict(self.stats),
         }

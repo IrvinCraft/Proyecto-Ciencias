@@ -73,13 +73,29 @@ BUTTON = (70, 85, 130)
 BUTTON_HOVER = (95, 115, 170)
 BUTTON_ACTIVE = (60, 75, 120)
 TEXT_LIGHT = (245, 245, 245)
-TEXT_MUTED = (180, 185, 210)
+TEXT_MUTED = (200, 203, 224)
 ACCENT = (255, 215, 0)
 CORRECT_GREEN = (46, 204, 113)
 INCORRECT_RED = (231, 76, 60)
 PROGRESS_BG = (50, 60, 90)
 PROGRESS_FILL = (100, 180, 255)
 WARNING_ORANGE = (255, 165, 0)
+TIME_MID_YELLOW = (241, 196, 15)
+
+# Variantes de boton
+PRIMARY_BG = (20, 120, 190)
+PRIMARY_HOVER = (50, 155, 225)
+SECONDARY_BG = (42, 52, 82)
+SECONDARY_HOVER = (58, 70, 108)
+SECONDARY_BORDER = (108, 118, 150)
+
+# Colores de los badges de dificultad
+BADGE_COLORS = {
+    "facil": CORRECT_GREEN,
+    "media": (52, 152, 219),
+    "dificil": (230, 126, 34),
+    "ultra_dificil": INCORRECT_RED,
+}
 
 # Niveles de dificultad y sus etiquetas
 LEVEL_LABELS = {
@@ -152,16 +168,22 @@ class SoundManager:
 # UI: Button
 # ---------------------------------------------------------------------------
 class Button:
-    """Boton clicable con efecto hover."""
+    """Boton clicable con efecto hover y variantes visuales.
+
+    variant "primary" usa el borde amarillo de acento y relleno con contraste
+    alto (adecuado para la accion principal); variant "secondary" usa un
+    relleno/borde atenuado (acciones secundarias como Salir).
+    """
 
     def __init__(self, rect, text, font, bg=BUTTON, hover=BUTTON_HOVER,
-                 text_color=TEXT_LIGHT):
+                 text_color=TEXT_LIGHT, variant="primary"):
         self.rect = pygame.Rect(rect)
         self.text = text
         self.font = font
         self.bg = bg
         self.hover = hover
         self.text_color = text_color
+        self.variant = variant
         self.hovered = False
         self.enabled = True
         self._render()
@@ -181,9 +203,14 @@ class Button:
         self.text_rect = self.text_surf.get_rect(center=self.rect.center)
 
     def draw(self, surface):
-        color = self.hover if (self.hovered and self.enabled) else self.bg
+        if self.variant == "secondary":
+            color = SECONDARY_HOVER if (self.hovered and self.enabled) else SECONDARY_BG
+            border = SECONDARY_BORDER
+        else:
+            color = self.hover if (self.hovered and self.enabled) else self.bg
+            border = ACCENT
         pygame.draw.rect(surface, color, self.rect, border_radius=8)
-        pygame.draw.rect(surface, ACCENT, self.rect, 2, border_radius=8)
+        pygame.draw.rect(surface, border, self.rect, 2, border_radius=8)
         surface.blit(self.text_surf, self.text_rect)
 
     def handle_event(self, event):
@@ -191,6 +218,11 @@ class Button:
             return False
         if event.type == pygame.MOUSEMOTION:
             self.hovered = self.rect.collidepoint(event.pos)
+            pygame.mouse.set_cursor(
+                pygame.SYSTEM_CURSOR_HAND
+                if (self.enabled and self.hovered)
+                else pygame.SYSTEM_CURSOR_ARROW
+            )
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             if self.rect.collidepoint(event.pos) and self.enabled:
                 return True
@@ -810,8 +842,8 @@ class Game:
         btn_w = int(min(720, w * 0.56))
         btn_h = int(h * 0.08)
         start_x = (w - btn_w) // 2
-        start_y = int(h * 0.48)
-        spacing = int(h * 0.095)
+        start_y = int(h * 0.44)
+        spacing = int(h * 0.09)
         for i in range(4):
             btn = Button(
                 (start_x, start_y + i * spacing, btn_w, btn_h),
@@ -823,7 +855,8 @@ class Game:
 
         self.btn_next = Button(
             (w // 2 - 80, h - 80, 160, 45),
-            "Siguiente", self.font_medium
+            "Siguiente", self.font_medium,
+            bg=PRIMARY_BG, hover=PRIMARY_HOVER, variant="primary"
         )
         self.btn_next.enabled = True
 
@@ -831,7 +864,7 @@ class Game:
         # justo debajo de la barra superior)
         self.btn_quiz_exit = Button(
             (w - 176, int(h * 0.065), 152, 42),
-            "Salir", self.font_small
+            "Salir", self.font_small, variant="secondary"
         )
 
     def _build_error_screen(self):
@@ -874,6 +907,11 @@ class Game:
         )
         self.screen.blit(score_surf, (20, mid_y))
 
+        # Racha de aciertos consecutivos (a partir de 2)
+        if self.quiz.current_streak >= 2:
+            self._draw_streak(20 + score_surf.get_width() + 14, mid_y,
+                              self.quiz.current_streak)
+
         # Cronometro (congelado si ya respondio)
         if self.quiz.answer_result is not None:
             t = self.quiz.answer_result["tiempo_usado"]
@@ -903,18 +941,62 @@ class Game:
             prog_surf, (self.width - prog_surf.get_width() - 20, mid_y)
         )
 
-        # Barra de progreso
+        # Barra de progreso: con cronometro muestra el tiempo restante (color
+        # por urgencia); con tiempo ilimitado muestra avance de preguntas.
+        # Se congela durante el fade y al responder (el cronometro no corre).
         bar_width = int(self.width * 0.30)
-        bar_height = max(6, int(self.height * 0.012))
+        bar_height = max(8, int(self.height * 0.020))
         bx = (self.width - bar_width) // 2
         by = bar_h - bar_height - 10
         pygame.draw.rect(self.screen, PROGRESS_BG,
                          (bx, by, bar_width, bar_height), border_radius=4)
-        progress = self.quiz.question_number / self.quiz.num_questions
-        fill_width = int(bar_width * progress)
+        if self.quiz.unlimited_time:
+            ratio = self.quiz.question_number / self.quiz.num_questions
+            fill_color = PROGRESS_FILL
+        elif self.quiz.time_per_question:
+            quedando = self.quiz.time_remaining
+            ratio = max(0.0, quedando or 0.0) / self.quiz.time_per_question
+            if ratio > 0.5:
+                fill_color = CORRECT_GREEN
+            elif ratio > 0.2:
+                fill_color = TIME_MID_YELLOW
+            else:
+                fill_color = INCORRECT_RED
+        else:
+            ratio = 0.0
+            fill_color = PROGRESS_FILL
+        fill_width = int(bar_width * ratio)
         if fill_width > 0:
-            pygame.draw.rect(self.screen, PROGRESS_FILL,
+            pygame.draw.rect(self.screen, fill_color,
                              (bx, by, fill_width, bar_height), border_radius=4)
+
+    def _draw_streak(self, x, y_center, streak):
+        """Indicador de racha junto al puntaje: flama dibujada + 'xN'."""
+        size = 12
+        fx = x + size
+        fy = y_center + 6
+        outer = [
+            (fx - int(size * 0.7), fy + int(size * 0.5)),
+            (fx - int(size * 0.5), fy - int(size * 0.2)),
+            (fx, fy - int(size * 1.15)),
+            (fx + int(size * 0.5), fy - int(size * 0.2)),
+            (fx + int(size * 0.7), fy + int(size * 0.5)),
+            (fx + int(size * 0.25), fy + int(size * 0.95)),
+            (fx - int(size * 0.25), fy + int(size * 0.95)),
+        ]
+        pygame.draw.polygon(self.screen, WARNING_ORANGE, outer)
+        inner = [
+            (fx - int(size * 0.25), fy + int(size * 0.4)),
+            (fx, fy + int(size * 0.05)),
+            (fx + int(size * 0.25), fy + int(size * 0.4)),
+            (fx, fy + int(size * 0.8)),
+        ]
+        pygame.draw.polygon(self.screen, ACCENT, inner)
+        txt = self.font_medium.render("x{}".format(streak), True, ACCENT)
+        self.screen.blit(
+            txt,
+            (fx + size + 8, y_center - txt.get_height() // 2 + 4),
+        )
 
     def _draw_flash_effect(self):
         """Dibuja el overlay de color al responder."""
@@ -1080,18 +1162,21 @@ class Game:
 
         q = self.quiz.current_question
 
-        # Nivel de dificultad con color
-        level_color = LEVEL_COLORS.get(q.nivel, TEXT_LIGHT)
-        level_surf = self.font_small.render(
-            f"Nivel: {LEVEL_LABELS.get(q.nivel, q.nivel).upper()}",
-            True, level_color
+        # Badge de dificultad (rectangulo redondeado con color segun nivel)
+        badge_label = LEVEL_LABELS.get(q.nivel, q.nivel).upper()
+        badge_surf = self.font_small.render(badge_label, True, (255, 255, 255))
+        badge_rect = pygame.Rect(
+            20, int(self.height * 0.13),
+            badge_surf.get_width() + 24, badge_surf.get_height() + 10
         )
-        self.screen.blit(level_surf, (20, int(self.height * 0.13)))
+        badge_color = BADGE_COLORS.get(q.nivel, TEXT_MUTED)
+        pygame.draw.rect(self.screen, badge_color, badge_rect, border_radius=9)
+        self.screen.blit(badge_surf, badge_surf.get_rect(center=badge_rect.center))
 
         # Panel de pregunta
         panel_rect = pygame.Rect(
             int(self.width * 0.05), int(self.height * 0.19),
-            int(self.width * 0.90), int(self.height * 0.26)
+            int(self.width * 0.90), int(self.height * 0.23)
         )
         pygame.draw.rect(self.screen, PANEL, panel_rect, border_radius=12)
         pygame.draw.rect(self.screen, ACCENT, panel_rect, 2, border_radius=12)
