@@ -13,6 +13,7 @@ import math
 import random
 import shutil
 import subprocess
+import threading
 import traceback
 import logging
 import pygame
@@ -24,6 +25,8 @@ sys.path.insert(0, BASE_DIR)
 from quiz_logic import QuestionLoader, Quiz, VALID_LEVELS
 from settings import Settings
 from question_bank import import_csv_to_bank, list_sessions
+import updater as updater_mod
+from updater import VERSION as APP_VERSION
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -106,6 +109,7 @@ SCREEN_QUIZ = "quiz"
 SCREEN_RESULTS = "results"
 SCREEN_ERROR = "error"
 SCREEN_IMPORT = "import"
+SCREEN_UPDATE = "update"
 
 
 # ---------------------------------------------------------------------------
@@ -545,7 +549,11 @@ class Game:
         self.import_sessions = []
         self.import_scroll = 0
         self._build_import_screen()
+        self._build_update_screen()
         logger.info("UI inicializada")
+
+        self.update_info = {"state": "checking", "info": None, "error": "", "applied": ""}
+        self._start_update_check()
 
         self.running = True
 
@@ -584,6 +592,7 @@ class Game:
         self._build_error_screen()
         self._build_results_screen()
         self._build_import_screen()
+        self._build_update_screen()
         if self.quiz:
             self._build_quiz_ui()
         if snapshot is not None:
@@ -609,6 +618,10 @@ class Game:
         self.btn_quit = Button(
             (btn_x, btn_top + 2 * (btn_h + gap), btn_w, btn_h),
             "Salir", self.font_medium
+        )
+        self.btn_update = Button(
+            (btn_x, btn_top + 3 * (btn_h + gap), btn_w, btn_h),
+            "Actualizaciones", self.font_medium
         )
 
     def _build_start_overlay(self):
@@ -941,6 +954,29 @@ class Game:
         self.btn_start.draw(self.screen)
         self.btn_settings.draw(self.screen)
         self.btn_quit.draw(self.screen)
+        self.btn_update.draw(self.screen)
+
+        # Version y aviso de actualizacion (esquina inferior)
+        version_surf = self.font_small.render(
+            "v{}".format(APP_VERSION), True, TEXT_MUTED
+        )
+        self.screen.blit(version_surf, (self.width - version_surf.get_width() - 14,
+                                        self.height - version_surf.get_height() - 10))
+
+        st = self.update_info.get("state")
+        if st == "ready":
+            info = self.update_info.get("info") or {}
+            aviso = self.font_small.render(
+                "Actualizacion disponible: v{}     (ir a Actualizaciones)".format(
+                    info.get("version", "")),
+                True, CORRECT_GREEN,
+            )
+            self.screen.blit(aviso, (14, self.height - aviso.get_height() - 10))
+        elif st == "checking":
+            aviso = self.font_small.render(
+                "Buscando actualizaciones...", True, TEXT_MUTED
+            )
+            self.screen.blit(aviso, (14, self.height - aviso.get_height() - 10))
 
         # Mensaje de confirmacion/error de importacion (temporal)
         self._draw_import_message()
@@ -1222,6 +1258,9 @@ class Game:
                     elif self.screen_state == SCREEN_IMPORT:
                         self._handle_import_event(event)
 
+                    elif self.screen_state == SCREEN_UPDATE:
+                        self._handle_update_event(event)
+
                 # Actualizaciones continuas
                 if self.screen_state == SCREEN_QUIZ and self.quiz:
                     self._update_quiz(dt)
@@ -1269,6 +1308,11 @@ class Game:
             logger.info("Abriendo pantalla de ajustes")
         if self.btn_quit.handle_event(event):
             self.running = False
+
+        if self.btn_update.handle_event(event):
+            self.sounds.play("click")
+            self.screen_state = SCREEN_UPDATE
+            logger.info("Abriendo pantalla de actualizaciones")
 
     def _set_import_message(self, text, ok=True, color=None):
         """Muestra un mensaje de importacion (banner en la pantalla Importar Quiz)."""
@@ -1466,6 +1510,22 @@ class Game:
             0, min(self.import_scroll, self._import_max_scroll())
         )
 
+    def _build_update_screen(self):
+        """Crea los elementos interactivos de la pantalla de actualizaciones."""
+        w, h = self.width, self.height
+        self.btn_update_back = Button(
+            (24, 18, 120, 42), "Volver", self.font_medium
+        )
+        btn_w, btn_h = 240, 48
+        self.btn_update_refresh = Button(
+            (w // 2 - btn_w - 20, h - 100, btn_w, btn_h),
+            "Buscar ahora", self.font_medium
+        )
+        self.btn_update_apply = Button(
+            (w // 2 + 20, h - 100, btn_w, btn_h),
+            "Descargar e instalar", self.font_medium
+        )
+
     def _import_max_scroll(self):
         """Desplazamiento maximo de la lista (0 si cabe entera)."""
         list_rect = self._import_layout()["list_rect"]
@@ -1547,6 +1607,85 @@ class Game:
             self._draw_import_empty(layout["list_rect"])
         else:
             self._draw_import_list(layout)
+
+    def draw_update_screen(self):
+        self._draw_gradient_bg(self.screen)
+
+        panel_rect = pygame.Rect(
+            int(self.width * 0.06), 64, int(self.width * 0.88), int(self.height * 0.80)
+        )
+        pygame.draw.rect(self.screen, PANEL, panel_rect, border_radius=12)
+        pygame.draw.rect(self.screen, ACCENT, panel_rect, 2, border_radius=12)
+
+        title = self.font_title.render("Actualizaciones", True, ACCENT)
+        self.screen.blit(title, (self.width // 2 - title.get_width() // 2, 30))
+
+        # Version instalada
+        ver_surf = self.font_medium.render(
+            "Version instalada: v{}".format(APP_VERSION), True, TEXT_LIGHT
+        )
+        self.screen.blit(ver_surf, (panel_rect.x + 30, panel_rect.y + 32))
+
+        state = self.update_info.get("state", "checking")
+        x = panel_rect.x + 30
+        y = panel_rect.y + 90
+        max_w = panel_rect.width - 60
+
+        if state == "checking":
+            txt = "Buscando actualizaciones en GitHub..."
+            self._draw_wrapped_text(txt, self.font_medium, TEXT_MUTED, x, y, max_w, 60)
+        elif state == "ok":
+            ok = self.font_medium.render(
+                "Ya tienes la ultima version. :) No hay nada que actualizar.",
+                True, CORRECT_GREEN,
+            )
+            self.screen.blit(ok, (x, y))
+        elif state == "error":
+            err = self.font_medium.render(
+                "No se pudo comprobar actualizaciones.", True, INCORRECT_RED
+            )
+            self.screen.blit(err, (x, y))
+            self._draw_wrapped_text(
+                self.update_info.get("error", ""), self.font_small,
+                TEXT_MUTED, x, y + 34, max_w, 90,
+            )
+            hint = self.font_small.render(
+                "Comprueba tu conexion a internet y reintenta.", True, TEXT_MUTED
+            )
+            self.screen.blit(hint, (x, y + 130))
+        elif state in ("ready", "applying", "applied"):
+            info = self.update_info.get("info") or {}
+            v = info.get("version") or ""
+            nuevo = self.font_large.render(
+                "Nueva version disponible: v{}".format(v), True, ACCENT
+            )
+            self.screen.blit(nuevo, (x, y))
+            y += 50
+            notas = (info.get("notas") or "").strip() or "Sin descripcion."
+            self._draw_wrapped_text(
+                "Notas del release:", self.font_medium, TEXT_LIGHT, x, y, max_w, 80,
+            )
+            y += 40
+            self._draw_wrapped_text(notas, self.font_small, TEXT_MUTED, x, y, max_w, 200)
+
+            if state == "applying":
+                self._draw_wrapped_text(
+                    "Descargando e instalando... no cierres la aplicacion.",
+                    self.font_medium, WARNING_ORANGE, x, panel_rect.bottom - 110,
+                    max_w, 60,
+                )
+            elif state == "applied":
+                self._draw_wrapped_text(
+                    self.update_info.get("applied", ""), self.font_medium,
+                    CORRECT_GREEN, x, panel_rect.bottom - 110, max_w, 90,
+                )
+
+        # Estado del boton de instalar
+        self.btn_update_apply.enabled = (state == "ready")
+
+        self.btn_update_back.draw(self.screen)
+        self.btn_update_refresh.draw(self.screen)
+        self.btn_update_apply.draw(self.screen)
 
     def _draw_import_banner(self, layout):
         """Banner persistente con el resultado de la ultima importacion."""
@@ -1728,6 +1867,64 @@ class Game:
         self.screen_state = SCREEN_SETTINGS
         logger.info("Usando banco de preguntas: %s (%d preguntas)",
                     sess["filename"], sess["num_questions"])
+
+    def _start_update_check(self):
+        """Comprueba en segundo plano si hay una version nueva en GitHub."""
+        self.update_info = {
+            "state": "checking", "info": None, "error": "", "applied": "",
+        }
+
+        def work():
+            try:
+                info = updater_mod.check_for_update()
+                self.update_info["state"] = "ready" if info else "ok"
+                self.update_info["info"] = info
+            except Exception as exc:
+                logger.warning("Fallo al buscar actualizaciones: %s", exc)
+                self.update_info["state"] = "error"
+                self.update_info["error"] = str(exc)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _start_update_apply(self):
+        """Descarga e instala la actualizacion en segundo plano."""
+        info = self.update_info.get("info")
+        if not info:
+            return
+        self.update_info["state"] = "applying"
+        self.update_info["applied"] = ""
+        zip_url = info["url"]
+        new_version = info["version"]
+
+        def work():
+            try:
+                ver, msg = updater_mod.apply_update(zip_url, new_version)
+                logger.info("Actualizacion aplicada a v%s", ver)
+                self.update_info["state"] = "applied"
+                self.update_info["applied"] = msg
+                self.update_info["info"] = None
+            except Exception as exc:
+                logger.error("Error al aplicar la actualizacion:\n%s",
+                             traceback.format_exc())
+                self.update_info["state"] = "error"
+                self.update_info["error"] = "Error al actualizar: {}".format(exc)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _handle_update_event(self, event):
+        if self.btn_update_back.handle_event(event):
+            self.sounds.play("click")
+            self.screen_state = SCREEN_START
+            logger.info("Volviendo al inicio desde actualizaciones")
+            return
+        if self.btn_update_refresh.handle_event(event):
+            self.sounds.play("click")
+            self._start_update_check()
+            return
+        st = self.update_info.get("state")
+        if self.btn_update_apply.handle_event(event) and st == "ready":
+            self.sounds.play("click")
+            self._start_update_apply()
 
     def _handle_settings_event(self, event):
         # Inputs
@@ -2004,6 +2201,8 @@ class Game:
             self.draw_error_screen()
         elif self.screen_state == SCREEN_IMPORT:
             self.draw_import_screen()
+        elif self.screen_state == SCREEN_UPDATE:
+            self.draw_update_screen()
 
         self._draw_fade()
 
