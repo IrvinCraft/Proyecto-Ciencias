@@ -61,19 +61,56 @@ def _parse_version(value):
     return (nums + [0, 0, 0])[:3]
 
 
+def _gh_token():
+    """Busca el token de GitHub configurado por el CLI 'gh'.
+
+    Necesario cuando el repositorio es PRIVADO (las descargas anonimas dan 404
+    en repos privados). Lee ~/.config/gh/hosts.yml con un mini-parser (sin
+    dependencias). Devuelve una cadena o None si no existe.
+    """
+    try:
+        path = os.path.join(os.path.expanduser("~"), ".config", "gh", "hosts.yml")
+        with open(path, "r", encoding="utf-8") as fh:
+            lines = fh.read().splitlines()
+    except Exception:
+        return None
+    in_core = False
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip())
+        if indent == 0:
+            in_core = stripped.rstrip(":").lower() == "github.com"
+            continue
+        if in_core and indent == 4 and stripped.startswith("oauth_token:"):
+            token = stripped.split(":", 1)[1].strip().strip("'\"")
+            if token:
+                return token
+    return None
+
+
+def _auth_headers():
+    """Cabeceras base; agrega Authorization si hay token de gh."""
+    headers = {"User-Agent": USER_AGENT}
+    token = _gh_token()
+    if token:
+        headers["Authorization"] = "Bearer {}".format(token)
+    return headers
+
+
 def _http_get_json(url, timeout=15):
     """GET a una URL y parsea la respuesta como JSON."""
-    req = urllib.request.Request(
-        url,
-        headers={"User-Agent": USER_AGENT, "Accept": "application/vnd.github+json"},
-    )
+    headers = _auth_headers()
+    headers["Accept"] = "application/vnd.github+json"
+    req = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
 def _http_download(url, dest, timeout=120):
     """Descarga una URL directamente a un archivo."""
-    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    req = urllib.request.Request(url, headers=_auth_headers())
     with urllib.request.urlopen(req, timeout=timeout) as resp, open(dest, "wb") as fh:
         shutil.copyfileobj(resp, fh)
 
@@ -81,10 +118,11 @@ def _http_download(url, dest, timeout=120):
 def check_for_update():
     """Consulta GitHub por el release mas reciente.
 
-    Devuelve un dict con 'version', 'tag', 'url' (zip a descargar) y 'notas'
-    si existe una version mas nueva que la local, o None si la app ya esta al
-    dia (o el repo aun no tiene releases). Lanza UpdateError si no hay
-    conexion o GitHub responde con un error.
+    Usa el token de gh (~/.config/gh/hosts.yml) si existe, necesario para
+    repositorios PRIVADOS. Devuelve un dict con 'version', 'tag', 'url'
+    (zip a descargar) y 'notas' si existe una version mas nueva que la local,
+    o None si la app ya esta al dia (o el repo aun no tiene releases).
+    Lanza UpdateError si no hay conexion o GitHub responde con un error.
     """
     url = GITHUB_API.format(repo=GITHUB_REPO)
     try:
