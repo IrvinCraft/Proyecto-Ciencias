@@ -97,6 +97,9 @@ BADGE_COLORS = {
     "ultra_dificil": INCORRECT_RED,
 }
 
+# Margen minimo entre elementos del HUD (pantalla SCREEN_QUIZ)
+HUD_PADDING = 20
+
 # Niveles de dificultad y sus etiquetas
 LEVEL_LABELS = {
     "facil": "Facil",
@@ -614,6 +617,18 @@ class Game:
             bold = key in BOLD_FONTS
             setattr(self, f"font_{key}", self._load_font(int(size * scale), bold=bold))
 
+    def _bar_height(self):
+        """Altura (grosor) de la barra de progreso del HUD."""
+        return max(8, int(self.height * 0.018))
+
+    def _top_bar_height(self):
+        """Altura de la barra superior: crece con la fuente para que quepan
+        la fila de textos (puntaje/tiempo/progreso) y la barra de progreso
+        sin tocarse (margen HUD_PADDING entre fila de textos y la barra)."""
+        font_fit = (self.font_medium.get_height() + self._bar_height()
+                    + 2 * HUD_PADDING)
+        return max(int(self.height * 0.09), font_fit)
+
     def _rebuild_all_ui(self):
         """Reconstruye toda la interfaz segun el tamano actual de la ventana."""
         snapshot = None
@@ -860,10 +875,11 @@ class Game:
         )
         self.btn_next.enabled = True
 
-        # Salir de la prueba en cualquier momento (esquina superior derecha,
-        # justo debajo de la barra superior)
+        # Salir de la prueba en cualquier momento: anclado a la derecha, justo
+        # debajo de la barra superior (con un margen fijo).
         self.btn_quiz_exit = Button(
-            (w - 176, int(h * 0.065), 152, 42),
+            (w - 152 - HUD_PADDING, self._top_bar_height() + HUD_PADDING,
+             152, 42),
             "Salir", self.font_small, variant="secondary"
         )
 
@@ -894,62 +910,26 @@ class Game:
         surface.blit(self.space.base, (0, 0))
 
     def _draw_top_bar(self):
-        """Dibuja la barra superior: puntaje, cronometro, progreso."""
-        bar_h = int(self.height * 0.09)
+        """Dibuja la barra superior: puntaje, cronometro, progreso.
+
+        Layout responsive con anclas:
+        - Puntaje (+ racha): margen izquierdo fijo.
+        - Progreso: anclado a la derecha, a la izquierda del boton Salir.
+        - Cronometro: centrado en el espacio libre entre ambos (nunca encima).
+        - Barra de progreso: fila propia, debajo de los textos.
+        """
+        bar_h = self._top_bar_height()
         bar_surf = pygame.Surface((self.width, bar_h), pygame.SRCALPHA)
         bar_surf.fill((20, 30, 55, 200))
         self.screen.blit(bar_surf, (0, 0))
-        mid_y = bar_h // 2 - 10
 
-        # Puntaje
-        score_surf = self.font_medium.render(
-            f"Puntaje: {self.quiz.score}", True, ACCENT
-        )
-        self.screen.blit(score_surf, (20, mid_y))
-
-        # Racha de aciertos consecutivos (a partir de 2)
-        if self.quiz.current_streak >= 2:
-            self._draw_streak(20 + score_surf.get_width() + 14, mid_y,
-                              self.quiz.current_streak)
-
-        # Cronometro (congelado si ya respondio)
-        if self.quiz.answer_result is not None:
-            t = self.quiz.answer_result["tiempo_usado"]
-            timer_text = f"Respondiste en: {t:.2f}s"
-            color = TEXT_LIGHT
-        elif self.quiz.unlimited_time:
-            timer_text = f"Tiempo: {self.quiz.question_time:.1f}s"
-            color = TEXT_LIGHT
-        else:
-            remaining = self.quiz.time_remaining
-            if remaining <= 3:
-                color = INCORRECT_RED
-            elif remaining <= 7:
-                color = WARNING_ORANGE
-            else:
-                color = TEXT_LIGHT
-            timer_text = f"Tiempo: {remaining:.1f}s"
-        timer_surf = self.font_medium.render(timer_text, True, color)
-        self.screen.blit(
-            timer_surf, (self.width // 2 - timer_surf.get_width() // 2, mid_y)
-        )
-
-        # Progreso
-        prog_text = f"Pregunta {self.quiz.question_number} de {self.quiz.num_questions}"
-        prog_surf = self.font_medium.render(prog_text, True, TEXT_LIGHT)
-        self.screen.blit(
-            prog_surf, (self.width - prog_surf.get_width() - 20, mid_y)
-        )
-
-        # Barra de progreso: con cronometro muestra el tiempo restante (color
-        # por urgencia); con tiempo ilimitado muestra avance de preguntas.
-        # Se congela durante el fade y al responder (el cronometro no corre).
-        bar_width = int(self.width * 0.30)
-        bar_height = max(8, int(self.height * 0.020))
-        bx = (self.width - bar_width) // 2
-        by = bar_h - bar_height - 10
+        # Barra de progreso (fila inferior, con margen fijo)
+        bar_width = int(self.width * 0.34)
+        bar_height = self._bar_height()
+        bar_x = (self.width - bar_width) // 2
+        bar_y = bar_h - bar_height - HUD_PADDING
         pygame.draw.rect(self.screen, PROGRESS_BG,
-                         (bx, by, bar_width, bar_height), border_radius=4)
+                         (bar_x, bar_y, bar_width, bar_height), border_radius=4)
         if self.quiz.unlimited_time:
             ratio = self.quiz.question_number / self.quiz.num_questions
             fill_color = PROGRESS_FILL
@@ -968,7 +948,72 @@ class Game:
         fill_width = int(bar_width * ratio)
         if fill_width > 0:
             pygame.draw.rect(self.screen, fill_color,
-                             (bx, by, fill_width, bar_height), border_radius=4)
+                             (bar_x, bar_y, fill_width, bar_height), border_radius=4)
+
+        # Fila de textos: centrada verticalmente en la zona libre que queda
+        # entre el margen superior y la barra de progreso.
+        zone_top = HUD_PADDING
+        zone_bottom = max(zone_top + 1, bar_y - HUD_PADDING)
+        row_cy = (zone_top + zone_bottom) // 2
+        top_y = row_cy - self.font_medium.get_height() // 2
+
+        # Puntaje (ancla izquierda)
+        score_surf = self.font_medium.render(
+            f"Puntaje: {self.quiz.score}", True, ACCENT
+        )
+        self.screen.blit(score_surf, (HUD_PADDING, top_y))
+        streak_w = 0
+        if self.quiz.current_streak >= 2:
+            streak_x = HUD_PADDING + score_surf.get_width() + 12
+            streak_w = self._draw_streak(streak_x, row_cy, self.quiz.current_streak)
+
+        # Progreso (ancla derecha, a la izquierda del boton Salir)
+        salir_rect = getattr(self, "btn_quiz_exit", None)
+        right_limit = self.width - HUD_PADDING
+        if salir_rect is not None:
+            right_limit = min(right_limit, salir_rect.rect.x - HUD_PADDING)
+        prog_text = (
+            f"Pregunta {self.quiz.question_number} de {self.quiz.num_questions}"
+        )
+        prog_font = self.font_medium
+        if prog_font.render(prog_text, True, TEXT_LIGHT).get_width() > (
+                right_limit - HUD_PADDING):
+            prog_font = self.font_small
+        prog_surf = prog_font.render(prog_text, True, TEXT_LIGHT)
+        prog_x = right_limit - prog_surf.get_width()
+        if prog_x < HUD_PADDING:
+            txt = prog_text
+            max_w = right_limit - 2 * HUD_PADDING
+            while txt and prog_font.render(txt + "...", True, TEXT_LIGHT).get_width() > max_w:
+                txt = txt[:-1]
+            prog_surf = prog_font.render((txt + "...") if txt else "...",
+                                         True, TEXT_LIGHT)
+            prog_x = right_limit - prog_surf.get_width()
+        self.screen.blit(prog_surf, (prog_x, top_y))
+
+        # Cronometro (centrado en la zona libre entre puntaje y progreso)
+        if self.quiz.answer_result is not None:
+            t = self.quiz.answer_result["tiempo_usado"]
+            timer_text = f"Respondiste en: {t:.2f}s"
+            color = TEXT_LIGHT
+        elif self.quiz.unlimited_time:
+            timer_text = f"Tiempo: {self.quiz.question_time:.1f}s"
+            color = TEXT_LIGHT
+        else:
+            remaining = self.quiz.time_remaining
+            if remaining <= 3:
+                color = INCORRECT_RED
+            elif remaining <= 7:
+                color = WARNING_ORANGE
+            else:
+                color = TEXT_LIGHT
+            timer_text = f"Tiempo: {remaining:.1f}s"
+        timer_surf = self.font_medium.render(timer_text, True, color)
+        left_bound = HUD_PADDING + score_surf.get_width() + streak_w + HUD_PADDING
+        right_bound = max(left_bound, prog_x - HUD_PADDING)
+        timer_x = left_bound + (right_bound - left_bound - timer_surf.get_width()) // 2
+        timer_x = max(HUD_PADDING, min(timer_x, right_bound - timer_surf.get_width()))
+        self.screen.blit(timer_surf, (timer_x, top_y))
 
     def _draw_streak(self, x, y_center, streak):
         """Indicador de racha junto al puntaje: flama dibujada + 'xN'."""
@@ -997,6 +1042,7 @@ class Game:
             txt,
             (fx + size + 8, y_center - txt.get_height() // 2 + 4),
         )
+        return (fx + size + 8 + txt.get_width()) - x
 
     def _draw_flash_effect(self):
         """Dibuja el overlay de color al responder."""
@@ -1162,21 +1208,30 @@ class Game:
 
         q = self.quiz.current_question
 
-        # Badge de dificultad (rectangulo redondeado con color segun nivel)
+        # Badge de dificultad (rectangulo redondeado con color segun nivel),
+        # anclado debajo de la barra superior
         badge_label = LEVEL_LABELS.get(q.nivel, q.nivel).upper()
         badge_surf = self.font_small.render(badge_label, True, (255, 255, 255))
+        badge_h = badge_surf.get_height() + 10
+        bar_bottom = self._top_bar_height() + HUD_PADDING
         badge_rect = pygame.Rect(
-            20, int(self.height * 0.13),
-            badge_surf.get_width() + 24, badge_surf.get_height() + 10
+            HUD_PADDING, bar_bottom,
+            badge_surf.get_width() + 24, badge_h
         )
         badge_color = BADGE_COLORS.get(q.nivel, TEXT_MUTED)
         pygame.draw.rect(self.screen, badge_color, badge_rect, border_radius=9)
         self.screen.blit(badge_surf, badge_surf.get_rect(center=badge_rect.center))
 
-        # Panel de pregunta
+        # Panel de pregunta: empieza debajo de la fila de badge/Salir y termina
+        # justo antes de las opciones (sin margenes fijos que colisionen)
+        panel_top = max(
+            int(self.height * 0.17),
+            bar_bottom + badge_h + HUD_PADDING,
+        )
+        panel_bottom = int(self.height * 0.44) - int(self.height * 0.015)
         panel_rect = pygame.Rect(
-            int(self.width * 0.05), int(self.height * 0.19),
-            int(self.width * 0.90), int(self.height * 0.23)
+            int(self.width * 0.05), panel_top,
+            int(self.width * 0.90), max(60, panel_bottom - panel_top)
         )
         pygame.draw.rect(self.screen, PANEL, panel_rect, border_radius=12)
         pygame.draw.rect(self.screen, ACCENT, panel_rect, 2, border_radius=12)
