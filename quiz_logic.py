@@ -9,6 +9,9 @@ import json
 import csv
 import random
 import os
+import io
+import re
+import unicodedata
 import logging
 from dataclasses import dataclass
 from typing import List, Optional
@@ -20,6 +23,27 @@ logger = logging.getLogger("quiz.logic")
 # Constantes
 # ---------------------------------------------------------------------------
 VALID_LEVELS = ("facil", "media", "dificil", "ultra_dificil")
+
+# Nombres canonicos de las columnas de un CSV de preguntas
+OPCION_COLS = ("opcion_a", "opcion_b", "opcion_c", "opcion_d")
+
+# Sinonimos aceptados por columna (ademas de las variaciones de escritura).
+# Excel en espanol a veces llama a la respuesta 'Clave de respuesta correcta'.
+COLUMN_ALIASES = {
+    "respuesta_correcta": (
+        "respuesta_correcta", "clave_de_respuesta", "clave_de_respuesta_correcta",
+        "clave_respuesta", "respuesta", "resp_correcta", "clave", "correcta",
+        "answer", "respuesta_ok",
+    ),
+    "nivel": ("nivel", "dificultad", "dificultad_del_item"),
+}
+
+# Sinonimos de los VALORES de nivel (despues de normalizar tildes/case)
+NIVEL_ALIASES = {
+    "medio": "media",
+    "baja_dificultad": "facil",
+    "alta_dificultad": "dificil",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -120,44 +144,136 @@ class QuestionLoader:
         return questions
 
     @staticmethod
+    def _read_csv_text(filepath: str) -> str:
+        """Lee un CSV probando varias codificaciones.
+
+        Un archivo puede estar en utf-8, cp1252 o latin-1 segun con que editor
+        lo escribio el autor (Word/Excel en Windows usan cp1252/latin-1 y rompen
+        la decodificacion utf-8 con tildes: e.g. byte 0xf3 = 'o' acentuada).
+        latin-1 decodifica cualquier byte, asi que siempre hay un fallback.
+        """
+        for enc in ("utf-8", "cp1252", "latin-1"):
+            try:
+                with open(filepath, "r", encoding=enc, newline="") as f:
+                    return f.read()
+            except UnicodeDecodeError:
+                continue
+        raise ValueError(
+            "No se pudo decodificar el CSV (probado utf-8, cp1252 y latin-1)"
+        )
+
+    @staticmethod
+    def _normalize_header(name: str) -> str:
+        """Normaliza un encabezado para aceptar variantes de escritura.
+
+        'Opcion B', 'OPCION B', 'opcion_b', 'oPciON_B', 'opción b' -> 'opcion_b'.
+        Baja mayusculas, quita tildes y cambia espacios/signos por guion bajo.
+        """
+        name = unicodedata.normalize("NFKD", name or "")
+        name = name.encode("ascii", "ignore").decode("ascii")
+        name = name.strip().lower()
+        return re.sub(r"[^a-z0-9]+", "_", name).strip("_")
+
+    @staticmethod
+    def _csv_reader(text: str):
+        """Devuelve csv.DictReader sobre el texto, detectando el delimitador.
+
+        Excel espanol exporta con punto y coma (';') en vez de coma. Se elige
+        el delimitador con mas ocurrencias en la primera linea (coma, ';' o tab).
+        """
+        first_line = (text.splitlines() or [""])[0]
+        delim, best = ",", -1
+        for d in (",", ";", "\t"):
+            c = first_line.count(d)
+            if c > best:
+                best, delim = c, d
+        return csv.DictReader(io.StringIO(text), delimiter=delim)
+
+    @staticmethod
+    def _column_map(fieldnames) -> dict:
+        """Mapa clave_canonica -> encabezado original del CSV.
+
+        Resuelve las variaciones de escritura ('Opcion B', 'oPciON_B',
+        'opción b') y los sinonimos de la respuesta ('Clave de respuesta
+        correcta', 'respuesta', ...) al nombre canonico interno.
+        """
+        norm2orig: dict = {}
+        for header in fieldnames or []:
+            norm2orig.setdefault(QuestionLoader._normalize_header(header), header)
+
+        canons = ["pregunta"] + list(OPCION_COLS) + ["respuesta_correcta", "nivel"]
+        colmap: dict = {}
+        for canon in canons:
+            for alias in COLUMN_ALIASES.get(canon, (canon,)):
+                if alias in norm2orig:
+                    colmap[canon] = norm2orig[alias]
+                    break
+        return colmap
+
+    @staticmethod
     def _load_csv(filepath: str) -> List[Question]:
         """Carga preguntas desde CSV.
         Columnas: pregunta, opcion_a..d, respuesta_correcta, nivel
         respuesta_correcta indica la letra (A, B, C o D) de la opcion valida.
+        Tolerante a codificacion y a variantes en los nombres de columna.
         """
         questions: List[Question] = []
-        opcion_cols = ["opcion_a", "opcion_b", "opcion_c", "opcion_d"]
-        with open(filepath, "r", encoding="utf-8", newline="") as f:
-            reader = csv.DictReader(f)
-            required_cols = {"pregunta", "respuesta_correcta", "nivel"}
-            col_names = set(reader.fieldnames or [])
-            missing = required_cols - col_names
-            if missing:
-                raise ValueError(f"Columnas faltantes en CSV: {missing}")
+        opcion_cols = list(OPCION_COLS)
+        text = QuestionLoader._read_csv_text(filepath)
+        reader = QuestionLoader._csv_reader(text)
+        colmap = QuestionLoader._column_map(reader.fieldnames)
+        required_cols = {"pregunta", "respuesta_correcta", "nivel"}
+        missing = required_cols - set(colmap)
+        if missing:
+            raise ValueError(
+                f"Columnas faltantes en CSV: {missing} "
+                f"(encabezados encontrados: {sorted(colmap) or 'ninguno'})"
+            )
 
-            if set(opcion_cols) - col_names:
-                raise ValueError(
-                    f"CSV necesita 4 columnas de opciones: {', '.join(opcion_cols)}"
-                )
+        if set(opcion_cols) - set(colmap):
+            raise ValueError(
+                f"CSV necesita 4 columnas de opciones: {', '.join(opcion_cols)}"
+            )
 
-            for i, row in enumerate(reader):
-                data = {
-                    "pregunta": row["pregunta"],
-                    "opciones": [row[c] for c in opcion_cols],
-                    "respuesta_correcta": row["respuesta_correcta"],
-                    "nivel": row["nivel"],
-                }
-                try:
-                    letra = str(data["respuesta_correcta"]).strip().upper()
-                    if letra not in "ABCD":
-                        raise ValueError(
-                            f"respuesta_correcta debe ser A, B, C o D (se obtuvo "
-                            f"'{row['respuesta_correcta']}')"
-                        )
-                    data["respuesta_correcta"] = data["opciones"]["ABCD".index(letra)]
-                    questions.append(Question.from_dict(data))
-                except (ValueError, KeyError) as e:
-                    raise ValueError(f"Error en fila {i + 2}: {e}")
+        def _val(row, key):
+            return (row.get(colmap[key]) or "") if key in colmap else ""
+
+        # El nivel puede venir con tildes/case/vocablo variado
+        def _nivel(row):
+            n = QuestionLoader._normalize_header(_val(row, "nivel"))
+            return NIVEL_ALIASES.get(n, n)
+
+        def _respuesta_letra(opciones, respuesta):
+            """Convierte la respuesta a una letra A-D. Acepta la letra o el
+            texto de la opcion ('b', 'B', 'animales', 'Opción B'...)."""
+            if respuesta.upper() in "ABCD":
+                return respuesta.upper()
+            coincidencias = [
+                i for i, o in enumerate(opciones)
+                if o and QuestionLoader._normalize_header(o) ==
+                QuestionLoader._normalize_header(respuesta)
+            ]
+            if coincidencias:
+                return "ABCD"[coincidencias[0]]
+            raise ValueError(
+                f"respuesta_correcta debe ser A, B, C o D (o el texto de la "
+                f"opcion; se obtuvo '{respuesta}')"
+            )
+
+        for i, row in enumerate(reader):
+            opciones = [_val(row, c) for c in opcion_cols]
+            data = {
+                "pregunta": _val(row, "pregunta"),
+                "opciones": opciones,
+                "respuesta_correcta": opciones["ABCD".index(
+                    _respuesta_letra(opciones, _val(row, "respuesta_correcta"))
+                )],
+                "nivel": _nivel(row),
+            }
+            try:
+                questions.append(Question.from_dict(data))
+            except (ValueError, KeyError) as e:
+                raise ValueError(f"Error en fila {i + 2}: {e}")
         return questions
 
     @staticmethod
@@ -180,62 +296,91 @@ class QuestionLoader:
 
     @staticmethod
     def _load_csv_lenient(filepath: str):
-        """Lee un CSV contando las filas validas e ignorando las malformadas."""
+        """Lee un CSV contando las filas validas e ignorando las malformadas.
+        Tolerante a codificacion (utf-8/cp1252/latin-1) y a variantes en los
+        encabezados: 'Opcion B', 'OPCION B', 'opcion_b', 'opción b', etc.
+        """
         questions: List[Question] = []
         skipped = 0
-        opcion_cols = ["opcion_a", "opcion_b", "opcion_c", "opcion_d"]
-        with open(filepath, "r", encoding="utf-8", newline="") as f:
-            reader = csv.DictReader(f)
-            col_names = set(reader.fieldnames or [])
-            missing = {"pregunta", "respuesta_correcta", "nivel"} - col_names
-            if missing:
-                raise ValueError(f"Columnas faltantes en CSV: {missing}")
-            if set(opcion_cols) - col_names:
-                raise ValueError(
-                    f"CSV necesita 4 columnas de opciones: {', '.join(opcion_cols)}"
+        opcion_cols = list(OPCION_COLS)
+        text = QuestionLoader._read_csv_text(filepath)
+        reader = QuestionLoader._csv_reader(text)
+        colmap = QuestionLoader._column_map(reader.fieldnames)
+        missing = {"pregunta", "respuesta_correcta", "nivel"} - set(colmap)
+        if missing:
+            raise ValueError(
+                f"Columnas faltantes en CSV: {missing} "
+                f"(encabezados encontrados: {sorted(colmap) or 'ninguno'})"
+            )
+        if set(opcion_cols) - set(colmap):
+            raise ValueError(
+                f"CSV necesita 4 columnas de opciones: {', '.join(opcion_cols)} "
+                f"(faltan: {', '.join(sorted(set(opcion_cols) - set(colmap)))})"
+            )
+
+        def _val(row, key):
+            return (row.get(colmap[key]) or "") if key in colmap else ""
+
+        # El nivel puede venir con tildes/case/vocablo variado
+        def _nivel(row):
+            n = QuestionLoader._normalize_header(_val(row, "nivel"))
+            return NIVEL_ALIASES.get(n, n)
+
+        def _respuesta_letra(opciones, respuesta):
+            """Convierte la respuesta a una letra A-D. Acepta la letra o el
+            texto de la opcion ('b', 'B', 'animales', 'Opción B'...)."""
+            if respuesta.upper() in "ABCD":
+                return respuesta.upper()
+            coincidencias = [
+                i for i, o in enumerate(opciones)
+                if o and QuestionLoader._normalize_header(o) ==
+                QuestionLoader._normalize_header(respuesta)
+            ]
+            if coincidencias:
+                return "ABCD"[coincidencias[0]]
+            raise ValueError(
+                f"respuesta_correcta debe ser A, B, C o D (o el texto de la "
+                f"opcion; se obtuvo '{respuesta}')"
+            )
+
+        for row in reader:
+            try:
+                pregunta = _val(row, "pregunta").strip()
+                if not pregunta:
+                    raise ValueError("pregunta vacia")
+                opciones = [_val(row, c).strip() for c in opcion_cols]
+                data = {
+                    "pregunta": pregunta,
+                    "opciones": opciones,
+                    "respuesta_correcta": opciones["ABCD".index(
+                        _respuesta_letra(opciones, _val(row, "respuesta_correcta"))
+                    )],
+                    "nivel": _nivel(row),
+                }
+                questions.append(Question.from_dict(data))
+            except (ValueError, KeyError, IndexError) as e:
+                skipped += 1
+                # Modo debug: cada fila rechazada con su numero de linea,
+                # un preview de la pregunta y el motivo exacto.
+                preview = (_val(row, "pregunta").strip() or "<?>")[:40]
+                logger.debug(
+                    "Fila %d ignorada [%s]: %s",
+                    reader.line_num, preview, e,
                 )
 
-            for row in reader:
-                try:
-                    if not (str(row.get("pregunta") or "").strip()):
-                        raise ValueError("pregunta vacia")
-                    letra = str(row.get("respuesta_correcta") or "").strip().upper()
-                    if letra not in "ABCD":
-                        raise ValueError(
-                            f"respuesta_correcta debe ser A, B, C o D "
-                            f"(se obtuvo '{row.get('respuesta_correcta')}')"
-                        )
-                    opciones = [row[c] for c in opcion_cols]
-                    data = {
-                        "pregunta": row["pregunta"],
-                        "opciones": opciones,
-                        "respuesta_correcta": opciones["ABCD".index(letra)],
-                        "nivel": row["nivel"],
-                    }
-                    questions.append(Question.from_dict(data))
-                except (ValueError, KeyError, IndexError) as e:
-                    skipped += 1
-                    # Modo debug: cada fila rechazada con su numero de linea,
-                    # un preview de la pregunta y el motivo exacto.
-                    preview = (str(row.get("pregunta") or "").strip() or "<?>")[:40]
-                    logger.debug(
-                        "Fila %d ignorada [%s]: %s",
-                        reader.line_num, preview, e,
-                    )
+        if not questions:
+            raise ValueError(
+                f"No hay filas validas en el CSV (se ignoraron {skipped} filas)"
+            )
 
-            if not questions:
-                raise ValueError(
-                    f"No hay filas validas en el CSV (se ignoraron {skipped} filas)"
-                )
-
-            if skipped:
-                logger.warning(
-                    "CSV '%s': %d validas y %d filas ignoradas. "
-                    "Usa --debug para ver el motivo de cada fila.",
-                    filepath, len(questions), skipped,
-                )
-            else:
-                logger.debug("CSV '%s': %d preguntas validas.", filepath, len(questions))
+        if skipped:
+            logger.warning(
+                "CSV '%s': %d validas y %d filas ignoradas. "
+                "Usa --debug para ver el motivo de cada fila.",
+                filepath, len(questions), skipped,
+            )
+        else:
+            logger.debug("CSV '%s': %d preguntas validas.", filepath, len(questions))
         logger.info("Cargadas %d preguntas (lenient) desde %s [ignoradas=%d]",
                     len(questions), filepath, skipped)
         return questions, skipped

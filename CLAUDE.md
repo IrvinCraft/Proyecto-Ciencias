@@ -23,6 +23,9 @@ verifican cambios con `python3 -m py_compile <archivo>` y pruebas ad hoc.
   `InputBox`, `Checkbox`, `SoundManager`, `SpaceBackground` (fondo animado).
 - `quiz_logic.py` — Lógica pura sin Pygame: `Question`, `QuestionLoader`
   (CSV/JSON), `Quiz` (estado, puntaje, cronómetro, stats por nivel).
+  El lector CSV es tolerante: detecta codificación (utf-8/cp1252/latin-1),
+  delimitador (`,` `;` tab), variantes de encabezados (`opcion B`, `opción b`,
+  `Clave de respuesta correcta`) y acepta la respuesta como letra o texto.
 - `settings.py` — `Settings`: carga/guarda `config.json` (sin Pygame).
 - `question_bank.py` — Importa CSVs a `csv/<fecha>/` y lista "sesiones".
 - `paths.py` — Resuelve rutas en modo fuente vs compilado (.exe).
