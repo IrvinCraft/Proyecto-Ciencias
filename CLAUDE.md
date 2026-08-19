@@ -50,6 +50,10 @@ Al comenzar se entra a `SCREEN_QUIZ`.
 ## Flujo clave: respuesta y transición de pregunta
 
 - Responder → `Quiz.answer()`, flash verde/rojo, `show_next_button = True`.
+- Si la respuesta es **incorrecta**, la correcta NO se muestra: aparece el botón
+  "Revelar respuesta" (estado `quiz.answer_revealed`). Al pulsarlo se pinta la
+  opción correcta en verde y aparece "Siguiente". Si acierta, verde inmediato y
+  sin botón de revelar. El tiempo ya está congelado tras responder.
 - "Siguiente" → `_next_question()`: solo marca `pending_next=True` y `fade_direction=+1`.
   **IMPORTANTE:** la pregunta NO avanza ahí. `_update_quiz()` ejecuta el fade:
   1) fade out a negro, 2) al llegar a `fade_alpha >= 255` avanza con

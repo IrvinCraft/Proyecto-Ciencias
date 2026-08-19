@@ -947,6 +947,15 @@ class Game:
         )
         self.btn_next.enabled = True
 
+        # El alumno decide mostrar la respuesta correcta tras fallar: se dibuja
+        # en el hueco de "Siguiente" hasta que la revela.
+        self.btn_reveal = Button(
+            (w // 2 - 90, h - 80, 180, 45),
+            "Revelar respuesta", self.font_medium,
+            bg=(90, 100, 145), hover=(110, 122, 175), variant="secondary"
+        )
+        self.btn_reveal.enabled = True
+
         # Salir de la prueba en cualquier momento: anclado a la derecha, justo
         # debajo de la barra superior (con un margen fijo).
         self.btn_quiz_exit = Button(
@@ -1354,21 +1363,26 @@ class Game:
         # Botones de opciones
         labels = ["A", "B", "C", "D"]
         answered = self.quiz.answer_result is not None
+        revealed = answered and self.quiz.answer_revealed
         for i, btn in enumerate(self.option_buttons):
             btn.text = f"{labels[i]}. {q.opciones[i]}"
             btn._render()
             if not answered:
                 btn.draw(self.screen)
-            elif i == self.correct_index:
+            elif revealed and i == self.correct_index:
                 btn.draw_colored(self.screen, (30, 120, 75), CORRECT_GREEN)
-            elif i == self.selected_index:
+            elif i == self.selected_index and i != self.correct_index:
                 btn.draw_colored(self.screen, (140, 50, 45), INCORRECT_RED)
             else:
                 btn.draw_colored(self.screen, BUTTON, SECONDARY_BORDER)
 
-        # Boton Siguiente (solo visible despues de responder)
+        # Tras responder: "Siguiente" si acerto o ya revelo; si fallo, primero
+        # aparece "Revelar respuesta" en su lugar.
         if self.show_next_button:
-            self.btn_next.draw(self.screen)
+            if self.quiz.answer_revealed:
+                self.btn_next.draw(self.screen)
+            else:
+                self.btn_reveal.draw(self.screen)
 
         # Boton para salir de la prueba en cualquier momento
         self.btn_quiz_exit.draw(self.screen)
@@ -2282,7 +2296,15 @@ class Game:
             self.exit_confirm = True
             return
 
-        if self.show_next_button and self.btn_next.handle_event(event):
+        # Tras fallar, primero debe revelar la respuesta correcta
+        if self.show_next_button and not self.quiz.answer_revealed \
+                and self.btn_reveal.handle_event(event):
+            self.sounds.play("click")
+            self.quiz.answer_revealed = True
+            return
+
+        if self.show_next_button and self.quiz.answer_revealed \
+                and self.btn_next.handle_event(event):
             self.sounds.play("click")
             self._next_question()
             return
@@ -2312,8 +2334,10 @@ class Game:
                 else:
                     self.flash_color = INCORRECT_RED
                     self.sounds.play("error")
-                # Feedback immediate de opciones: verde la correcta, roja la
-                # elegida (si es incorrecta); el resto queda neutro.
+                # La correcta solo se marca en verde si acerto (o si el profesor
+                # decide revelarla). Al fallar, roja en la elegida y lista para
+                # el boton "Revelar respuesta".
+                self.quiz.answer_revealed = is_correct
                 self.correct_index = q.indice_correcto()
                 self.selected_index = btn.index
                 for ob in self.option_buttons:
@@ -2648,7 +2672,9 @@ class Game:
                 self.sounds.play("error")
                 self.flash_timer = self.flash_duration
                 self.show_next_button = True
-                # Al acabarse el tiempo, marcar en verde la opcion correcta
+                # Al acabarse el tiempo es un fallo: no se revela la correcta
+                # hasta que se pulse "Revelar respuesta".
+                self.quiz.answer_revealed = False
                 self.correct_index = self.quiz.current_question.indice_correcto()
                 self.selected_index = None
                 for ob in self.option_buttons:

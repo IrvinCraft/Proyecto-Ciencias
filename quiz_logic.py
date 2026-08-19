@@ -416,6 +416,7 @@ class Quiz:
         self.total_time_used = 0.0
         self.times_responded: List[float] = []   # tiempo por cada pregunta respondida
         self.answer_result: Optional[dict] = None
+        self.answer_revealed = False  # UI: si la correcta ya se mostro al alumno
         self.game_over = False
 
         # Estadisticas por nivel
@@ -522,6 +523,7 @@ class Quiz:
     def next_question(self):
         """Avanza a la siguiente pregunta o termina el juego."""
         self.answer_result = None
+        self.answer_revealed = False
         self.current_index += 1
         if self.current_index >= self.num_questions:
             self.game_over = True
@@ -604,6 +606,7 @@ def save_progress(filepath: str, quiz: Quiz, settings: dict) -> None:
         "total_time_used": round(quiz.total_time_used, 3),
         "times_responded": [round(t, 3) for t in quiz.times_responded],
         "answer_result": quiz.answer_result,
+        "answer_revealed": quiz.answer_revealed,
         "current_streak": quiz.current_streak,
         "max_streak": quiz.max_streak,
     }
@@ -666,6 +669,7 @@ def resume_quiz(data: dict) -> Quiz:
 
     ar = data.get("answer_result")
     quiz.answer_result = ar if isinstance(ar, dict) else None
+    quiz.answer_revealed = bool(data.get("answer_revealed", False))
 
     quiz.current_streak = int(data.get("current_streak", 0))
     quiz.max_streak = int(data.get("max_streak", 0))
