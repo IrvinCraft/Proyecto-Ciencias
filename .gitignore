@@ -8,3 +8,7 @@ dist/
 update_tmp/
 .codegraph/
 progress.json
+# Sesiones CSV importadas por el usuario y CSVs sueltos en la raiz
+# (el banco por defecto ya commiteado se mantiene trackeado)
+csv/
+Test.csv
