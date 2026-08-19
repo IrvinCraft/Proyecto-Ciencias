@@ -611,6 +611,7 @@ class Game:
         self.correct_index = None    # indice de la opcion correcta (feedback)
         self.selected_index = None   # indice de la opcion elegida (feedback)
         self.exit_confirm = False    # modal "salir del quiz" abierto
+        self.resume_prompt = False   # pregunta "¿reanudar sesion?" en inicio
 
         # Fuentes y UI
         self.space = SpaceBackground()
@@ -744,6 +745,27 @@ class Game:
                 (btn_x, btn_top + 3 * step, btn_w, btn_h),
                 "Actualizaciones", self.font_medium
             )
+
+        # Modal "reanudar sesion?" que pregunta al pulsar "Comenzar Quiz"
+        # mientras exista un progreso guardado.
+        modal_w = min(560, int(w * 0.74))
+        modal_h = int(max(190, min(220, h * 0.28)))
+        self.resume_prompt_box = pygame.Rect(
+            (w - modal_w) // 2, (h - modal_h) // 2, modal_w, modal_h
+        )
+        pb = self.resume_prompt_box
+        act_h = 44
+        act_w = (pb.width - 3 * HUD_PADDING) // 2
+        act_y = pb.bottom - act_h - HUD_PADDING
+        self.btn_resume_yes = Button(
+            (pb.x + HUD_PADDING, act_y, act_w, act_h),
+            "Sí, reanudar", self.font_medium,
+            bg=POSITIVE_BG, hover=POSITIVE_HOVER, variant="positive"
+        )
+        self.btn_resume_no = Button(
+            (pb.right - HUD_PADDING - act_w, act_y, act_w, act_h),
+            "No, empezar nuevo", self.font_medium, variant="secondary"
+        )
 
     def _build_start_overlay(self):
         """Capa semitransparente vertical para legibilidad sobre el fondo animado."""
@@ -1416,6 +1438,28 @@ class Game:
         self.btn_exit_save.draw(self.screen)
         self.btn_exit_unsave.draw(self.screen)
 
+    def _draw_resume_prompt(self):
+        """Pregunta de reanudacion en el inicio: hay una sesion guardada."""
+        overlay = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 150))
+        self.screen.blit(overlay, (0, 0))
+
+        box = self.resume_prompt_box
+        pygame.draw.rect(self.screen, PANEL, box, border_radius=14)
+        pygame.draw.rect(self.screen, ACCENT, box, 2, border_radius=14)
+
+        titulo = self.font_medium.render(
+            "¿Deseas reanudar la sesión anterior?", True, TEXT_LIGHT
+        )
+        sub = self.font_small.render(
+            "Reanudar tu progreso guardado o empezar una nueva.", True, TEXT_MUTED
+        )
+        self.screen.blit(titulo, titulo.get_rect(center=(box.centerx, box.y + 45)))
+        self.screen.blit(sub, sub.get_rect(center=(box.centerx, box.y + 80)))
+
+        self.btn_resume_yes.draw(self.screen)
+        self.btn_resume_no.draw(self.screen)
+
     def _draw_wrapped_text(self, text, font, color, x, y, max_width, max_height):
         """Dibuja texto envuelto dentro de un rectangulo."""
         words = text.split(" ")
@@ -1612,13 +1656,22 @@ class Game:
 
     # -- event handlers ------------------------------------------------------
     def _handle_start_event(self, event):
+        # El modal de reanudacion captura la entrada mientras esta abierto
+        if self.resume_prompt:
+            self._handle_resume_prompt_event(event)
+            return
+
         if os.path.exists(PROGRESS_PATH) and self.btn_continue.handle_event(event):
             self.sounds.play("click")
             self._continue_saved_quiz()
             return
         if self.btn_start.handle_event(event):
             self.sounds.play("click")
-            self._open_import_screen()
+            if os.path.exists(PROGRESS_PATH):
+                # Hay sesion guardada: preguntar si reanudar o empezar nuevo
+                self.resume_prompt = True
+            else:
+                self._open_import_screen()
         if self.btn_settings.handle_event(event):
             self.sounds.play("click")
             self.settings_warning = ""
@@ -1631,6 +1684,26 @@ class Game:
             self.sounds.play("click")
             self.screen_state = SCREEN_UPDATE
             logger.info("Abriendo pantalla de actualizaciones")
+
+    def _handle_resume_prompt_event(self, event):
+        """Sí = reanudar la sesion guardada; No = ir al importador (empezar
+        nuevo). ESC o clic fuera cierran el modal sin hacer nada."""
+        if self.btn_resume_yes.handle_event(event):
+            self.sounds.play("click")
+            self.resume_prompt = False
+            self._continue_saved_quiz()
+            return
+        if self.btn_resume_no.handle_event(event):
+            self.sounds.play("click")
+            self.resume_prompt = False
+            self._open_import_screen()
+            return
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+            self.resume_prompt = False
+            return
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if not self.resume_prompt_box.collidepoint(event.pos):
+                self.resume_prompt = False
 
     def _set_import_message(self, text, ok=True, color=None):
         """Muestra un mensaje de importacion (banner en la pantalla Importar Quiz)."""
@@ -2370,6 +2443,9 @@ class Game:
         if self.btn_exit_unsave.handle_event(event):
             self.sounds.play("click")
             self.exit_confirm = False
+            # "Salir sin guardar" = descartar el guardado previo, para que no
+            # vuelva a ofrecerse reanudar una sesion que el usuario no quiso.
+            clear_progress(PROGRESS_PATH)
             self._exit_quiz()
             return
         if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
@@ -2712,6 +2788,10 @@ class Game:
         # Modal de confirmacion de salida: sobre el fade (overlay independiente)
         if self.screen_state == SCREEN_QUIZ and self.exit_confirm:
             self._draw_exit_confirm_modal()
+
+        # Prompt de reanudacion en la pantalla de inicio
+        if self.screen_state == SCREEN_START and self.resume_prompt:
+            self._draw_resume_prompt()
 
 
 # ---------------------------------------------------------------------------

@@ -75,8 +75,11 @@ Niveles válidos: `facil, media, dificil, ultra_dificil`.
 - `data_dir()/progress.json` guarda un quiz a medio terminar: orden de
   preguntas, índice actual, puntaje, stats, rachas, tiempo y `answer_result`.
 - "Guardar y salir" (modal de Salir) escribe el archivo y vuelve a SCREEN_START;
-  "Salir sin guardar" sale sin persistir. Botón X o ESC cierran el modal.
-- SCREEN_START muestra "Continuar quiz guardado" mientras exista el archivo.
+  "Salir sin guardar" sale sin persistir y BORRA el guardado previo.
+  Botón X o ESC cierran el modal.
+- SCREEN_START: si existe el guardado, hay botón "Continuar quiz guardado" y
+  al pulsar "Comenzar Quiz" se pregunta "¿reanudar sesión anterior?" (Sí →
+  reanuda; No → menú de importación).
 - Se borra al terminar el quiz (results) y al iniciar uno nuevo.
 - Lógica en `quiz_logic.py`: `save_progress`, `load_progress`, `clear_progress`,
   `resume_quiz`. `resume_quiz` respeta el orden guardado (no re-baraja).

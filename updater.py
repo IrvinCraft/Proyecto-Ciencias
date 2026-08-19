@@ -52,7 +52,7 @@ PRESERVED = {
     ".~lock.questions.csv#",
 }
 
-VERSION = "1.0.3"
+VERSION = "1.0.4"
 USER_AGENT = "Quiz-Educativo-updater/1.0"
 
 
