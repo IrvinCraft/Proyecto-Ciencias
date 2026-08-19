@@ -213,13 +213,29 @@ class QuestionLoader:
                         "nivel": row["nivel"],
                     }
                     questions.append(Question.from_dict(data))
-                except (ValueError, KeyError, IndexError):
+                except (ValueError, KeyError, IndexError) as e:
                     skipped += 1
+                    # Modo debug: cada fila rechazada con su numero de linea,
+                    # un preview de la pregunta y el motivo exacto.
+                    preview = (str(row.get("pregunta") or "").strip() or "<?>")[:40]
+                    logger.debug(
+                        "Fila %d ignorada [%s]: %s",
+                        reader.line_num, preview, e,
+                    )
 
             if not questions:
                 raise ValueError(
                     f"No hay filas validas en el CSV (se ignoraron {skipped} filas)"
                 )
+
+            if skipped:
+                logger.warning(
+                    "CSV '%s': %d validas y %d filas ignoradas. "
+                    "Usa --debug para ver el motivo de cada fila.",
+                    filepath, len(questions), skipped,
+                )
+            else:
+                logger.debug("CSV '%s': %d preguntas validas.", filepath, len(questions))
         logger.info("Cargadas %d preguntas (lenient) desde %s [ignoradas=%d]",
                     len(questions), filepath, skipped)
         return questions, skipped

@@ -5,7 +5,7 @@ main.py
 Punto de entrada de la aplicacion del Quiz Educativo.
 Interfaz grafica con Pygame (animaciones, sonidos, botones clicables).
 
-Uso:  python main.py
+Uso:  python main.py [--debug]
 """
 import os
 import sys
@@ -16,6 +16,7 @@ import subprocess
 import threading
 import traceback
 import logging
+import argparse
 import pygame
 
 # Asegurar el path del directorio del script
@@ -35,13 +36,18 @@ from updater import VERSION as APP_VERSION
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
+# El archivo quiz.log se escribe SIEMPRE a nivel DEBUG (diagnostico completo).
+# La terminal, por defecto, muestra INFO; con `--debug` sube a DEBUG y enseña
+# cada fila de CSV rechazada y su motivo.
 LOG_FILE = os.path.join(data_dir(), "quiz.log")
+log_stream = logging.StreamHandler()
+log_stream.setLevel(logging.INFO)  # --debug lo sube a DEBUG en main()
 logging.basicConfig(
     level=logging.DEBUG,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     handlers=[
         logging.FileHandler(LOG_FILE, encoding="utf-8"),
-        logging.StreamHandler(),
+        log_stream,
     ],
 )
 logger = logging.getLogger("quiz")
@@ -1753,6 +1759,7 @@ class Game:
         msg = f"✓ {len(questions)} preguntas detectadas — {partes}"
         if skipped:
             msg += f" — ⚠ {skipped} filas ignoradas por formato incorrecto"
+            msg += " (terminal: --debug para ver el motivo de cada fila)"
 
         self._set_import_message(
             msg,
@@ -2675,7 +2682,20 @@ class Game:
 # Entry point
 # ---------------------------------------------------------------------------
 def main():
-    """Inicializa y ejecuta el juego."""
+    """Inicializa y ejecuta el juego. --debug activa el detalle en terminal."""
+    parser = argparse.ArgumentParser(
+        description="Quiz Educativo - banco de preguntas con Pygame"
+    )
+    parser.add_argument(
+        "--debug", action="store_true",
+        help="muestra en terminal cada fila de CSV rechazada al importar y su motivo",
+    )
+    args = parser.parse_args()
+    if args.debug:
+        # La terminal pasa de INFO a DEBUG (los motivos de filas van con logger.debug)
+        log_stream.setLevel(logging.DEBUG)
+        logger.info("Modo debug activado: se mostraran las filas CSV ignoradas")
+
     game = Game()
     game.run()
 

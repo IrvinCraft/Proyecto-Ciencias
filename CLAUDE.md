@@ -6,8 +6,13 @@ animaciones espaciales, sonidos). Banco de preguntas importable desde CSV.
 ## Cómo ejecutar
 
 ```
-python3 main.py
+python3 main.py            # ejecucion normal (terminal: INFO)
+python3 main.py --debug    # detalle por fila CSV rechazada al importar
 ```
+
+El log completo (DEBUG) siempre va a `data_dir()/quiz.log`. Con `--debug`
+la terminal muestra además cada fila de CSV ignorada con el motivo exacto
+(siempre se guardan en quiz.log, aunque no se use `--debug`).
 
 Requiere `pygame` (ver `requirements.txt`). No hay tests configurados; se
 verifican cambios con `python3 -m py_compile <archivo>` y pruebas ad hoc.
