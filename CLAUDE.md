@@ -84,21 +84,24 @@ Niveles válidos: `facil, media, dificil, ultra_dificil`.
 ## Sistema de actualizaciones (updater.py)
 
 - `check_for_update()` consulta `releases/latest` del repo GitHub y compara
-  semver contra `VERSION`. Devuelve dict o None (siempre actualizado / sin
-  releases), lanza `UpdateError` si no hay red.
-- `apply_update()` descarga el zip del tag y copia sobre el proyecto
-  PRESERVANDO: `config.json`, `csv/`, `questions.csv/json`, `quiz.log`,
-  `__pycache__`, `.git`.
-- En modo compilado (.exe) `apply_update()` lanza `UpdateError`: el exe no se
-  auto-reemplaza en marcha; se indica descargar el nuevo desde GitHub Releases.
-- Usa el token de `gh` (`~/.config/gh/hosts.yml` o `%APPDATA%/GitHub CLI`) si
-  existe (necesario si el repo fuera privado; ahora es público).
+  semver contra `VERSION`. El repo es público: peticiones ANÓNIMAS (sin token
+  de `gh`). Devuelve dict o None (siempre actualizado / sin releases), lanza
+  `UpdateError` si no hay red.
+- Modo fuente: `apply_update()` descarga el zip del tag y copia sobre el
+  proyecto PRESERVANDO: `config.json`, `csv/`, `progress.json`,
+  `questions.csv/json`, `quiz.log`, `__pycache__`, `.git`.
+- Modo instalado (.exe, onedir): `apply_update()` baja el asset `update.zip`
+  (carpeta de la app), escribe `apply_update.bat` y lo lanza: cierra la app,
+  pisa los archivos de la instalación y la reabre. Así se actualiza EN SITIO:
+  no se acumulan .exe nuevos.
 
-## Release / build del .exe
+## Release / build (instalador + update.zip)
 
-`.github/workflows/build-exe.yml` compila en `windows-latest` con PyInstaller
-(`--onefile`, py3.12) cuando se pushea un tag `v*`, inyecta la versión del tag
-en `updater.py` y sube `QuizEducativo.exe` al release de ese tag.
+`.github/workflows/build-exe.yml` compila en `windows-latest` (py3.12) cuando
+se pushea un tag `v*`, inyecta la versión en `updater.py` y produce:
+- `QuizEducativo-setup-vX.Y.Z.exe` — instalador Inno Setup (`installer.iss`,
+  a `%LOCALAPPDATA%\QuizEducativo`, sin admin, por eso puede auto-actualizarse).
+- `update.zip` — paquete onedir para la auto-actualización en sitio.
 
 Publicar una versión:
 

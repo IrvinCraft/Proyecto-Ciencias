@@ -1,8 +1,10 @@
 name: Build EXE
 
-# Compila automaticamente un .exe de Windows (QuizEducativo) con PyInstaller
-# cada vez que se publica un tag de version (v1.0.0, v1.0.1, ...) y lo sube
-# como asset del release correspondiente en GitHub.
+# Compila automaticamente el instalador de Windows (QuizEducativo) con
+# PyInstaller (ondir) + Inno Setup cada vez que se publica un tag de version
+# (v1.0.0, v1.0.1, ...) y sube al release correspondiente:
+#   - QuizEducativo-setup-vX.Y.Z.exe  (instalador para el usuario)
+#   - update.zip                     (paquete para auto-actualizacion en sitio)
 
 on:
   push:
@@ -14,7 +16,7 @@ permissions:
 
 jobs:
   build:
-    name: Generar QuizEducativo.exe
+    name: Generar instalador QuizEducativo
     runs-on: windows-latest
 
     steps:
@@ -27,7 +29,7 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - name: Inyectar la version del tag en la app
+      - name: Inyectar la version del tag en la app y en el instalador
         shell: pwsh
         run: |
           $ver = $env:GITHUB_REF_NAME -replace '^v',''
@@ -35,26 +37,42 @@ jobs:
           $content = Get-Content updater.py -Raw
           $new = [regex]::Replace($content, 'VERSION = "[^" ]*"', "VERSION = `"$ver`"")
           Set-Content updater.py -Value $new -Encoding utf8
+          Add-Content -Path $env:GITHUB_ENV -Value "APP_VERSION=$ver"
 
-      - name: Instalar dependencias
+      - name: Instalar dependencias e Inno Setup
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt pyinstaller
+          choco install innosetup -y --no-progress
 
-      - name: Compilar el .exe con PyInstaller
+      - name: Compilar la app con PyInstaller (onedir)
         run: |
-          pyinstaller --noconfirm --onefile --clean --name QuizEducativo `
+          pyinstaller --noconfirm --onedir --clean --name QuizEducativo `
             --add-data "assets;assets" `
             --add-data "questions.csv;." `
             main.py
 
-      - name: Verificar artefacto
+      - name: Empaquetar update.zip (para auto-actualizacion en sitio)
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "dist\QuizEducativo\*" -DestinationPath "dist\update.zip" -Force
+
+      - name: Compilar el instalador con Inno Setup
+        shell: pwsh
+        run: |
+          $iscc = Get-ChildItem "C:\Program Files*\Inno Setup*\ISCC.exe" |
+            Sort-Object FullName -Descending | Select-Object -First 1
+          & $iscc.FullName installer.iss "/DMyAppVersion=$env:APP_VERSION"
+
+      - name: Verificar artefactos
         run: Get-ChildItem dist
 
-      - name: Publicar el .exe en el release del tag
+      - name: Publicar instalador y paquete en el release del tag
         uses: softprops/action-gh-release@v2
         with:
           name: ${{ github.ref_name }}
           tag_name: ${{ github.ref_name }}
-          files: dist/QuizEducativo.exe
+          files: |
+            dist/QuizEducativo-setup-*.exe
+            dist/update.zip
           generate_release_notes: true

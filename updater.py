@@ -14,7 +14,10 @@ Como publicar una nueva version (en la PC de desarrollo):
     git commit -m "v1.0.1"
     git tag v1.0.1
     git push origin master --tags
-    gh release create v1.0.1 --title "v1.0.1" --notes "Descripcion del cambio"
+
+El workflow de GitHub compila el instalador (Inno Setup) y el paquete
+update.zip, y los sube al release del tag. La app instalada se actualiza en
+sitio descargando update.zip (no se acumulan .exe).
 """
 
 import json
@@ -22,6 +25,7 @@ import logging
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import urllib.error
@@ -38,6 +42,7 @@ RELEASE_URL = "https://github.com/{repo}/archive/refs/tags/{tag}.zip"
 PRESERVED = {
     "config.json",
     "csv",
+    "progress.json",
     "questions.csv",
     "questions.json",
     "quiz.log",
@@ -47,7 +52,7 @@ PRESERVED = {
     ".~lock.questions.csv#",
 }
 
-VERSION = "1.0.2"
+VERSION = "1.0.3"
 USER_AGENT = "Quiz-Educativo-updater/1.0"
 
 
@@ -62,55 +67,10 @@ def _parse_version(value):
     return (nums + [0, 0, 0])[:3]
 
 
-def _gh_token():
-    """Busca el token de GitHub configurado por el CLI 'gh'.
-
-    Necesario cuando el repositorio es PRIVADO (las descargas anonimas dan 404
-    en repos privados). Revisa las rutas del CLI de gh en Linux/mac y Windows
-    con un mini-parser (sin dependencias). Devuelve una cadena o None.
-    """
-    candidates = []
-    if sys.platform == "win32":
-        appdata = os.environ.get("APPDATA")
-        if appdata:
-            candidates.append(os.path.join(appdata, "GitHub CLI", "hosts.yml"))
-    else:
-        candidates.append(os.path.join(os.path.expanduser("~"), ".config", "gh", "hosts.yml"))
-
-    lines = None
-    for path in candidates:
-        try:
-            with open(path, "r", encoding="utf-8") as fh:
-                lines = fh.read().splitlines()
-            break
-        except Exception:
-            continue
-    if lines is None:
-        return None
-
-    in_core = False
-    for line in lines:
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        indent = len(line) - len(line.lstrip())
-        if indent == 0:
-            in_core = stripped.rstrip(":").lower() == "github.com"
-            continue
-        if in_core and indent == 4 and stripped.startswith("oauth_token:"):
-            token = stripped.split(":", 1)[1].strip().strip("'\"")
-            if token:
-                return token
-    return None
-
-
 def _auth_headers():
-    """Cabeceras base; agrega Authorization si hay token de gh."""
-    headers = {"User-Agent": USER_AGENT}
-    token = _gh_token()
-    if token:
-        headers["Authorization"] = "Bearer {}".format(token)
-    return headers
+    """Cabeceras basicas. El repo es publico, asi que no hace falta token:
+    las peticiones son anonimas (evita errores por tokens vencidos)."""
+    return {"User-Agent": USER_AGENT}
 
 
 def _http_get_json(url, timeout=15):
@@ -132,11 +92,11 @@ def _http_download(url, dest, timeout=120):
 def check_for_update():
     """Consulta GitHub por el release mas reciente.
 
-    Usa el token de gh (~/.config/gh/hosts.yml) si existe, necesario para
-    repositorios PRIVADOS. Devuelve un dict con 'version', 'tag', 'url'
-    (zip a descargar) y 'notas' si existe una version mas nueva que la local,
-    o None si la app ya esta al dia (o el repo aun no tiene releases).
-    Lanza UpdateError si no hay conexion o GitHub responde con un error.
+    El repo es publico: la consulta es anonima (sin token). Devuelve un dict
+    con 'version', 'tag', 'url' (zip a descargar) y 'notas' si existe una
+    version mas nueva que la local, o None si la app ya esta al dia (o el repo
+    aun no tiene releases). Lanza UpdateError si no hay conexion o GitHub
+    responde con un error.
     """
     url = GITHUB_API.format(repo=GITHUB_REPO)
     try:
@@ -161,25 +121,41 @@ def check_for_update():
         "version": ".".join(str(n) for n in latest),
         "tag": tag,
         "url": RELEASE_URL.format(repo=GITHUB_REPO, tag=tag),
+        # Paquete de la app para actualizacion en sitio (una carpeta onedir).
+        # Solo existe en los releases nuevos; None en releases viejos.
+        "update_zip": _asset_url(data, "update.zip"),
         "notas": str(data.get("body") or "").strip(),
     }
+
+
+def _asset_url(data, name):
+    """Busca en el release el 'browser_download_url' de un asset por nombre."""
+    for asset in data.get("assets") or []:
+        if asset.get("name") == name:
+            return asset.get("browser_download_url")
+    return None
 
 
 def apply_update(zip_url, new_version):
     """Descarga y aplica la actualizacion.
 
-    Extrae el zip a una carpeta temporal, copia los archivos del proyecto
-    sobre la instalacion actual saltando los datos preservados del usuario,
-    y limpia los .pyc viejos. Devuelve (nueva_version, mensaje).
-
-    En la version compilada (exe) no se puede sobrescribir el ejecutable en
-    marcha; se indica que la actualizacion se descarga desde GitHub Releases.
+    - Modo fuente (python main.py): extrae el zip del tag y copia sobre el
+      proyecto, preservando los datos del usuario.
+    - Modo instalado (.exe): descarga el paquete update.zip (los archivos
+      nuevos de la app) y deja un .bat que espera al cierre de la app, pisa
+      los archivos de la instalacion y la reabre. Asi NO se acumulan .exe:
+      siempre se actualiza la instalacion existente.
     """
     if getattr(sys, "frozen", False):
-        raise UpdateError(
-            "Esta version empaquetada (.exe) se actualiza descargando el "
-            "nuevo QuizEducativo.exe desde GitHub Releases"
-        )
+        return _apply_update_installed(zip_url, new_version)
+    return _apply_update_source(zip_url, new_version)
+
+
+def _apply_update_source(zip_url, new_version):
+    """Modo fuente: extrae el zip del tag y copia sobre el proyecto
+    saltando los datos preservados del usuario."""
+    if not zip_url:
+        raise UpdateError("Sin URL de actualizacion")
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
     tmp = tempfile.mkdtemp(prefix="quiz_update_")
@@ -232,3 +208,74 @@ def apply_update(zip_url, new_version):
         )
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _winpath(path):
+    """Normaliza una ruta a uso en .bat de Windows (barras invertidas)."""
+    return os.path.normpath(path).replace(os.sep, "\\") if os.sep != "\\" \
+        else os.path.normpath(path)
+
+
+def _write_update_bat(bat_path, extract_dir, install_dir, tmp_dir):
+    """Genera el .bat que aplica la actualizacion en la instalacion:
+    espera a que cierre la app, reemplaza los archivos y la reabre."""
+    exe = _winpath(os.path.join(install_dir, "QuizEducativo.exe"))
+    extract = _winpath(extract_dir)
+    install = _winpath(install_dir)
+    tmp = _winpath(tmp_dir)
+    lines = [
+        "@echo off",
+        "rem Aplicador de actualizacion generado por la app",
+        "timeout /t 3 /nobreak >nul",
+        "taskkill /IM QuizEducativo.exe /F >nul 2>&1",
+        'xcopy "{extract}" "{install}" /E /Y /I >nul'.format(
+            extract=extract, install=install
+        ),
+        'rmdir /s /q "{tmp}" >nul 2>&1'.format(tmp=tmp),
+        'start "" "{exe}"'.format(exe=exe),
+    ]
+    with open(bat_path, "w", encoding="utf-8", newline="") as fh:
+        # newline='' : sin traducciones, el \r\n va literal (evita dobles \r)
+        fh.write("\r\n".join(lines) + "\r\n")
+
+
+def _apply_update_installed(zip_url, new_version):
+    """Modo instalado (.exe): descarga update.zip y programa el reemplazo.
+
+    No se puede pisar el .exe en marcha, asi que se escribe un .bat que
+    cierra la app, sustituye los archivos de la instalacion y la reabre.
+    """
+    if not zip_url:
+        raise UpdateError(
+            "El release no trae el paquete de actualizacion (update.zip). "
+            "Descarga el instalador desde GitHub Releases."
+        )
+
+    install_dir = os.path.dirname(os.path.abspath(sys.executable))
+    tmp = tempfile.mkdtemp(prefix="quiz_update_")
+    zip_path = os.path.join(tmp, "update.zip")
+    extract_dir = os.path.join(tmp, "extract")
+
+    logger.info("Descargando paquete de actualizacion %s desde %s",
+                new_version, zip_url)
+    _http_download(zip_url, zip_path)
+
+    os.makedirs(extract_dir, exist_ok=True)
+    with zipfile.ZipFile(zip_path) as zf:
+        for name in zf.namelist():
+            norm = os.path.normpath(name)
+            if norm.startswith(("..", "/")) or os.path.isabs(norm):
+                raise UpdateError("El paquete de actualizacion es invalido")
+        zf.extractall(extract_dir)
+
+    bat_path = os.path.join(tmp, "apply_update.bat")
+    _write_update_bat(bat_path, extract_dir, install_dir, tmp)
+
+    # Lanzar el .bat en una ventana nueva y salir; el bat borra tmp al final,
+    # por eso aqui NO se limpia la carpeta temporal.
+    flags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
+    subprocess.Popen(["cmd", "/c", bat_path], creationflags=flags)
+    return new_version, (
+        "La app se cerrara y se actualizara sola. Vuelve a abrirla en unos "
+        "segundos."
+    )

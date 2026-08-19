@@ -13,6 +13,6 @@
         "ultra_dificil": 50
     },
     "time_per_question": 15.0,
-    "unlimited_time": true,
-    "question_file": "/home/irvinperez/Descargas/Proyecto Ciencias/csv/2026-08-19_07-36-16/Test.csv"
+    "unlimited_time": false,
+    "question_file": "/home/irvinperez/Descargas/Proyecto Ciencias/csv/2026-08-19_13-47-00/cuestionario 1 2026.csv"
 }

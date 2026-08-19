@@ -1101,9 +1101,15 @@ class Game:
 
         # Cronometro (centrado en la zona libre entre puntaje y progreso)
         if self.quiz.answer_result is not None:
-            t = self.quiz.answer_result["tiempo_usado"]
-            timer_text = f"Respondiste en: {t:.2f}s"
-            color = TEXT_LIGHT
+            if self.quiz.answer_result.get("timeout"):
+                # Se acabo el tiempo: no es "respondiste en Xs" (ese X fue el
+                # tiempo de la pregunta, no el usado realmente).
+                timer_text = "Tiempo agotado"
+                color = INCORRECT_RED
+            else:
+                t = self.quiz.answer_result["tiempo_usado"]
+                timer_text = f"Respondiste en: {t:.2f}s"
+                color = TEXT_LIGHT
         elif self.quiz.unlimited_time:
             timer_text = f"Tiempo: {self.quiz.question_time:.1f}s"
             color = TEXT_LIGHT
@@ -2206,7 +2212,11 @@ class Game:
             return
         self.update_info["state"] = "applying"
         self.update_info["applied"] = ""
-        zip_url = info["url"]
+        # En exe instalado se usa el paquete update.zip; en fuente el zip del tag
+        if getattr(sys, "frozen", False):
+            zip_url = info.get("update_zip") or info["url"]
+        else:
+            zip_url = info["url"]
         new_version = info["version"]
 
         def work():
