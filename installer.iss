@@ -10,10 +10,9 @@
 
 #define MyAppName "Quiz Educativo"
 #define MyAppExeName "QuizEducativo.exe"
-#define MyAppId "AC2463C9-0B3E-4FA9-9A0C-QuizEducativo01"
 
 [Setup]
-AppId={{#MyAppId}
+AppId=ProyectoCiencias-QuizEducativo
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher=Proyecto-Ciencias
